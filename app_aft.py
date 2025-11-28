@@ -248,22 +248,16 @@ def trova_scarpe_simili(df, target_label, metrics_cols, n_simili=3):
     degli indici biomeccanici (escluso Value Index).
     """
     try:
-        # Ottieni i valori del target
         target_vector = df.loc[df['label'] == target_label, metrics_cols].astype(float).values[0]
-        
-        # Calcola la distanza per tutto il dataframe
-        # Usiamo una copia per non modificare l'originale
         df_calc = df.copy()
         
         # Calcolo distanza euclidea vettoriale
-        # sqrt(sum((x - y)^2))
         vectors = df_calc[metrics_cols].astype(float).values
         distances = np.linalg.norm(vectors - target_vector, axis=1)
         
         df_calc['distanza_similitudine'] = distances
         
-        # Ordina per distanza (più basso = più simile) ed escludi se stesso (distanza 0)
-        # Filtriamo distance > 0.00001 per evitare lo stesso modello
+        # Escludi se stesso
         simili = df_calc[df_calc['label'] != target_label].sort_values('distanza_similitudine').head(n_simili)
         
         return simili
@@ -284,10 +278,8 @@ def render_stars(value):
         return ""
     score = int(round(value * 5))
     score = max(0, min(5, score))
-    
     full_star = "★"
     empty_star = "☆"
-    
     return (full_star * score) + (empty_star * (5 - score))
 
 
@@ -403,13 +395,13 @@ with col_pesi:
     w_flex   = st.slider("Stiffness (Flex)", 1, 5, 3)
     w_weight = st.slider("Weight (Leggerezza)", 1, 5, 3)
 
-# Ricalcolo MPI dinamico (basato sugli input del wizard)
+# Ricalcolo MPI dinamico
 raw_weights = np.array([w_shock, w_energy, w_flex, w_weight], dtype=float)
 tot = raw_weights.sum() if raw_weights.sum() > 0 else 1.0
 norm_weights = raw_weights / tot
 w_shock_eff, w_energy_eff, w_flex_eff, w_weight_eff = norm_weights
 
-# Ricalcolo Shock/Energy (basato sull'appoggio)
+# Ricalcolo Shock/Energy
 def safe_minmax_series(x):
     return (x - x.min()) / max(x.max() - x.min(), 1e-12)
 
@@ -586,7 +578,13 @@ if not df_simili.empty:
     for i, (idx, row_sim) in enumerate(df_simili.iterrows()):
         with cols[i]:
             st.markdown(f"#### {row_sim['marca']}")
-            st.write(f"**{row_sim['modello']}**")
+            
+            # FIX VERSIONE: Mostriamo modello + versione in modo chiaro
+            nome_modello = f"{row_sim['modello']}"
+            if pd.notna(row_sim.get('versione')):
+                nome_modello += f" v{int(row_sim['versione'])}"
+            
+            st.write(f"**{nome_modello}**")
             
             # Mostriamo la differenza di prezzo
             diff_prezzo = row_sim[PRICE_COL] - row[PRICE_COL]
