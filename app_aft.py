@@ -544,33 +544,39 @@ if selected_for_detail:
             df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
             df_comp = df_comp.reset_index(drop=True) 
 
-            # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
+            # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per la tabella
             df_comp = df_comp.rename(columns={
                 "ShockIndex_calc": "ShockIndex",
                 "EnergyIndex_calc": "EnergyIndex"
             })
             
+            # Colonne numeriche da pulire per la tabella
             metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+            cols_to_clean = ["MPI_B", "ValueIndex"] + metrics_plot
             
-            # 1. Definizione colonne per la tabella (incluso Price e Value)
-            cols_table = ["label", "MPI_B", "ValueIndex"] + metrics_plot
-            cols_table = [c for c in cols_table if c in df_comp.columns]
-            
-            # 2. Pulizia Tipi per Tabella (Cruciale per PyArrow)
+            # --- FIX: CICLO DI PULIZIA 1D (per risolvere TypeError) ---
             try:
-                for col in [c for c in cols_table if c != "label"]:
-                    # Converte forzatamente i valori numerici e assegna il float
-                    df_comp.loc[:, col] = pd.to_numeric(df_comp[col], errors='coerce').astype(float)
+                for col in cols_to_clean:
+                    if col in df_comp.columns:
+                        # 1. Isola la Series (lettura sicura 1D)
+                        series_to_convert = df_comp[col]
+                        
+                        # 2. Converte la Series e assegna il risultato (scrittura sicura)
+                        df_comp.loc[:, col] = pd.to_numeric(
+                            series_to_convert, 
+                            errors='coerce'
+                        ).astype(float)
             except Exception as e:
-                st.error(f"Errore di pulizia dati (PyArrow): {e}")
-                st.stop()
-            # -------------------------------------------------------------
-            
-            
+                # Se la pulizia fallisce (es. dati corrotti nel CSV), visualizziamo l'errore
+                st.error(f"Errore di pulizia dati: Il contesto del DataFrame è instabile. Dettaglio: {e}")
+                # Non usiamo st.stop() qui per non bloccare l'app se il problema è isolato
+            # ---------------------------------------------------------------------------
+
+
             if not df_comp.empty:
                 
                 # df_display è una copia per la visualizzazione con arrotondamento
-                df_display = df_comp[cols_table].copy()
+                df_display = df_comp[[c for c in ["label", "MPI_B", PRICE_COL, "ValueIndex"] + metrics_plot if c in df_comp.columns]].copy()
                 df_display.iloc[:, 1:] = df_display.iloc[:, 1:].round(3) 
 
                 st.dataframe(df_display, use_container_width=True)
@@ -578,3 +584,4 @@ if selected_for_detail:
                 st.info("Nessun dato disponibile per i modelli selezionati (controlla i filtri).")
         else:
             st.warning("Seleziona almeno un modello per visualizzare il confronto.")
+
