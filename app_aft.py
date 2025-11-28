@@ -428,38 +428,105 @@ st.dataframe(
 )
 
 # =========================
-#   CONFRONTO E DETTAGLIO
+#   DETTAGLIO SCARPA
 # =========================
-col_sx, col_dx = st.columns([1, 2])
 
-with col_sx:
-    st.markdown("### Dettaglio Scarpa")
-    if not df_filt.empty:
-        sel_shoe = st.selectbox("Scegli scarpa", df_filt["label"].unique())
-        row = df_filt[df_filt["label"] == sel_shoe].iloc[0]
-        
-        st.metric("MPI-B Score", f"{row['MPI_B']:.3f}")
-        st.write(f"**Categoria:** {row['passo']}")
-        st.write(f"**Peso:** {row['peso']}g (W.Idx: {row['WeightIndex']:.2f})")
-        st.write(f"**Cluster:** {row['ClusterDescrizione']}")
-        
-        st.write("---")
-        st.write("**Indici:**")
-        st.progress(float(row['ShockIndex']), text=f"Shock: {row['ShockIndex']:.2f}")
-        st.progress(float(row['EnergyIndex']), text=f"Energy: {row['EnergyIndex']:.2f}")
-        st.progress(float(row['FlexIndex']), text=f"Flex: {row['FlexIndex']:.2f}")
-        st.progress(float(row['WeightIndex']), text=f"Weight: {row['WeightIndex']:.2f}")
-    else:
-        st.warning("Nessuna scarpa nei filtri.")
+st.subheader("Dettaglio scarpa")
 
-with col_dx:
-    st.markdown("### Confronto Radar")
-    if len(df_filt) > 0:
-        cmp_shoes = st.multiselect("Confronta con...", df_filt["label"].unique(), max_selections=3)
-        if cmp_shoes:
-            df_cmp = df_filt[df_filt["label"].isin(cmp_shoes)]
-            metrics = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-            fig = plot_radar_indices(df_cmp, metrics)
+if not df_filt.empty:
+    # 1. Recupera la selezione dell'utente
+    scelta = st.selectbox(
+        "Seleziona una scarpa",
+        df_filt["label"].tolist(),
+        # Se la lista è lunga, usa il primo elemento come default
+        index=0 
+    )
+    scarpa = df_filt[df_filt["label"] == scelta].iloc[0]
+    
+    # 2. Mostra Dettagli (come prima)
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown(f"### {scarpa['marca']} {scarpa['modello']}")
+        if "versione" in scarpa and pd.notna(scarpa["versione"]):
+            st.write(f"Versione: {int(scarpa['versione'])}")
+        st.write(f"Passo / categoria (AFT): {scarpa['passo']}")
+        st.write(f"Peso: {scarpa['peso']} g")
+
+        if PRICE_COL is not None and pd.notna(scarpa[PRICE_COL]):
+            st.write(f"Prezzo: {scarpa[PRICE_COL]:.0f} €")
+
+        st.write(f"Drop: {scarpa['drop']} mm")
+        st.write(f"Stack (tallone): {scarpa['altezza_tallone']} mm")
+
+    with col2:
+        st.write("**Indici biomeccanici**")
+        st.write(f"ShockIndex: {scarpa['ShockIndex']:.3f}")
+        st.write(f"EnergyIndex: {scarpa['EnergyIndex']:.3f}")
+        st.write(f"FlexIndex: {scarpa['FlexIndex']:.3f}")
+        st.write(f"WeightIndex: {scarpa['WeightIndex']:.3f}")
+        st.write(f"StackFactor: {scarpa['StackFactor']:.3f}")
+
+    with col3:
+    	st.write("**Performance & cluster**")
+    	st.metric("MPI-B", f"{scarpa['MPI_B']:.3f}")
+
+    	if "ValueIndex" in scarpa.index and pd.notna(scarpa["ValueIndex"]):
+        	st.write(f"Value index (0–1): {scarpa['ValueIndex']:.3f}")
+
+    	st.write(f"Cluster: {scarpa['Cluster']}")
+
+    	if "ClusterDescrizione" in scarpa.index:
+        	st.write(scarpa["ClusterDescrizione"])
+
+else:
+    st.info("Nessuna scarpa corrisponde ai filtri selezionati.")
+
+
+# =========================
+#   CONFRONTO SCARPE
+# =========================
+
+st.subheader("Confronto scarpe")
+
+if not df_filt.empty:
+    # Imposta la scarpa selezionata in "Dettaglio" come pre-selezionata nel confronto.
+    initial_selection = [scelta] if 'scelta' in locals() and scelta in df_filt["label"].tolist() else []
+
+    selezione_confronto = st.multiselect(
+        "Seleziona fino a 3 scarpe da confrontare",
+        df_filt["label"].tolist(),
+        max_selections=3,
+        default=initial_selection # <--- QUESTA È LA CHIAVE DELLA MODIFICA
+    )
+
+    if selezione_confronto:
+        df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
+
+        # Tabella comparativa
+        colonne_confronto = [
+            "label", "marca", "modello", "versione", "passo",
+            "MPI_B", "Cluster",
+            "ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor",
+            "peso", "drop", "altezza_tallone", "altezza_mesopiede"
+        ]
+        colonne_confronto = [c for c in colonne_confronto if c in df_comp.columns]
+
+        st.write("Tabella comparativa (MPI + indici)")
+        st.dataframe(df_comp[colonne_confronto], use_container_width=True)
+
+        # Grafico Radar
+        metrics = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+        metrics = [m for m in metrics if m in df_comp.columns]
+
+        if metrics:
+            st.write("Profilo radar sugli indici biomeccanici")
+            fig = plot_radar_indices(df_comp, metrics, label_col="label")
             st.pyplot(fig)
         else:
-            st.info("Seleziona scarpe dal menu qui sopra per il radar.")
+            st.info("Indici per il radar non disponibili.")
+    else:
+        st.info("Seleziona almeno una scarpa per il confronto.")
+else:
+    st.info("Servono scarpe nei filtri attuali per fare un confronto.")
+
