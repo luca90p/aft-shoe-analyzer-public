@@ -107,7 +107,64 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df["StackFactor"] = StabilityMod
     df["EnergyIndex"] = df["EnergyIndex"] * EnergyMod * StabilityMod
     df["FlexIndex"]   = df["FlexIndex"]   * StabilityMod
+    
+    # --- 5. DRIVE INDEX (NUOVO) ---
+    # Calcola l'indice di spinta basato su Piastra, Rocker, Torsione e Grip
+    df = calcola_drive_index(df)
 
+    return df
+
+def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcola il 'Drive Index' (0-1) basato su Piastra, Rocker (Altezza), Torsione e Grip.
+    """
+    # 1. Punteggio Piastra
+    def score_plate(val):
+        val = str(val).lower()
+        if 'carbon' in val: return 1.0
+        if any(x in val for x in ['plastic', 'nylon', 'fiber', 'pebax', 'airzoom']): return 0.6
+        return 0.0
+
+    df['S_Plate'] = df['piastra'].apply(score_plate)
+
+    # 2. Punteggio Rocker (Estrae la PRIMA parte = Altezza/Toe Spring)
+    def score_rocker(val):
+        if pd.isna(val) or str(val) in ['nan', '#N/D']: return 0.0
+        try:
+            # Gestione formato '6x10' -> estrae 6
+            clean_val = str(val).replace(',', '.')
+            parts = clean_val.split('x')
+            if len(parts) >= 1:
+                height = float(parts[0]) # Altezza cuneo
+                # Normalizziamo su un'altezza massima ragionevole (es. 8mm)
+                return min(height / 8.0, 1.0)
+            return 0.0
+        except:
+            return 0.0
+            
+    df['S_Rocker'] = df['rocker'].apply(score_rocker)
+
+    # 3. Punteggio Torsione (Normalizzato 1-5 -> 0-1)
+    # Più è rigida (5), meglio trasmette la spinta.
+    torsion = pd.to_numeric(df['rigidezza_torsionale'], errors='coerce').fillna(2)
+    df['S_Torsion'] = (torsion - 2) / 3.0
+    df['S_Torsion'] = df['S_Torsion'].clip(0, 1)
+
+    # 4. Punteggio Grip (Min-Max)
+    grip = pd.to_numeric(df['test_trazione'], errors='coerce')
+    min_g, max_g = grip.min(), grip.max()
+    df['S_Grip'] = (grip - min_g) / (max_g - min_g)
+    df['S_Grip'] = df['S_Grip'].fillna(0.5)
+
+    # FORMULA FINALE DRIVE
+    # Pesi: Plate 30%, Rocker 30%, Torsion 20%, Grip 20%
+    df['DriveIndex'] = (
+        0.30 * df['S_Plate'] +
+        0.30 * df['S_Rocker'] +
+        0.20 * df['S_Torsion'] +
+        0.20 * df['S_Grip']
+    )
+    
     return df
 
 def calcola_MPIB(df: pd.DataFrame) -> pd.DataFrame:
@@ -191,15 +248,15 @@ def esegui_clustering(df: pd.DataFrame):
 
     return df, cluster_summary
 
-
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     """ Scatter plot MPI-B vs Prezzo usando Plotly (solo hover). """
     
+    # Crea la colonna per l'evidenziazione
     df_val['Colore_Evidenziazione'] = df_val['label'].apply(
         lambda x: 'Selezionato' if x in selected_points_labels else 'Mercato'
     )
     
-    # Ordina per portare i punti selezionati in primo piano
+    # Ordina per portare i punti selezionati in primo piano nel grafico
     df_val = df_val.sort_values(by='Colore_Evidenziazione', ascending=True).reset_index(drop=True)
     
     df_val['hover_text'] = df_val.apply(
@@ -242,8 +299,13 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     
     return fig
 
+# =============================================
+#   NUOVA FUNZIONE RADAR CHART CON STILI E 5 ASSI
+# =============================================
 def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Confronto Biomeccanico (Radar)"):
-    """ Crea un Radar Chart interattivo con Plotly (Stilizzato). """
+    """ 
+    Crea un Radar Chart interattivo con Plotly.
+    """
     
     fig = go.Figure()
     
@@ -251,11 +313,13 @@ def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Confronto Biom
         "ShockIndex_calc": "Shock",
         "EnergyIndex_calc": "Energy",
         "FlexIndex": "Flex",
-        "WeightIndex": "Weight"
+        "WeightIndex": "Weight",
+        "DriveIndex": "Drive" # Aggiunto Drive
     }
     
     categories = [metrics_readable.get(m, m) for m in metrics]
     
+    # Colori per le scarpe di confronto (Simili)
     comparison_colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd']
     
     # 1. DISEGNA PRIMA LE SCARPE DI CONFRONTO
@@ -363,7 +427,7 @@ def load_and_process(path):
     df = calcola_MPIB(df)
     df, cluster_summary = esegui_clustering(df)
 
-    index_cols = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor", "MPI_B"]
+    index_cols = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor", "MPI_B", "DriveIndex"]
     for col in index_cols:
         if col in df.columns:
             df[col] = df[col].astype(float).round(3)
@@ -478,16 +542,16 @@ else:
     df_filt["ValueIndex"] = 0.0
 
 st.success("MPI Score ricalcolato!")
+st.markdown("---")
+
 
 # ============================================
 # NUOVO BLOCCO: BEST PICK PER BUDGET
 # ============================================
 
-st.markdown("---")
 st.header("💡 Best Pick: La Migliore per Te")
 
 if PRICE_COL:
-    # Determina range slider
     min_p = int(df_filt[PRICE_COL].min())
     max_p = int(df_filt[PRICE_COL].max())
     
@@ -498,19 +562,16 @@ if PRICE_COL:
             "💰 Seleziona il tuo Budget Massimo (€):",
             min_value=min_p, 
             max_value=max_p, 
-            value=int(max_p * 0.8), # Default al 80% del max
+            value=int(max_p * 0.8),
             step=5
         )
     
-    # Logica di filtraggio
     df_budget = df_filt[df_filt[PRICE_COL] <= budget_max].copy()
     
     with col_best:
         if not df_budget.empty:
-            # Trova la migliore per MPI tra quelle nel budget
             best_pick = df_budget.sort_values(by="MPI_B", ascending=False).iloc[0]
             
-            # Visualizza Card "Best Pick"
             with st.container(border=True):
                 c1, c2 = st.columns([2, 1])
                 with c1:
@@ -545,7 +606,6 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
     
     if not df_val.empty:
         
-        # Gestione Stato
         df_val_sorted = df_val.sort_values(by="ValueIndex", ascending=False)
         default_label_on_load = df_val_sorted.iloc[0]['label']
         
@@ -627,7 +687,7 @@ if selected_for_detail:
                 st.markdown(f"### {val_idx:.3f} {stars}")
 
         with col_dx:
-            st.write("#### Biomeccanica")
+            st.write("#### Biomeccanica e Spinta")
             st.write(f"**Cat:** {row['passo']} | **Peso:** {row['peso']}g")
             
             c1, c2 = st.columns(2)
@@ -639,6 +699,12 @@ if selected_for_detail:
                 val_flex = float(row['FlexIndex'])
                 st.caption(f"Flexibility: {val_flex:.2f}")
                 st.progress(val_flex)
+                
+                # DRIVE
+                val_drive = float(row['DriveIndex'])
+                st.markdown(f"**🚀 Drive (Spinta): {val_drive:.2f}**")
+                st.progress(val_drive)
+
             with c2:
                 val_energy = float(row['EnergyIndex_calc'])
                 st.caption(f"Energy Ret: {val_energy:.2f}")
@@ -653,13 +719,13 @@ if selected_for_detail:
 # ============================================
 
 st.markdown("---")
-st.header("🔎 Modelli Simili (Biomeccanica)")
+st.header("🔎 Modelli Simili (Biomeccanica + Spinta)")
 
-cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
+# Aggiungiamo DriveIndex al confronto radar e similarità
+cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
 df_simili = trova_scarpe_simili(df_filt, selected_for_detail, cols_simil, n_simili=3)
 
 if not df_simili.empty:
-    # 1. Mostra le card dei modelli simili
     cols = st.columns(3)
     for i, (idx, row_sim) in enumerate(df_simili.iterrows()):
         with cols[i]:
@@ -673,7 +739,7 @@ if not df_simili.empty:
                 st.caption(f"MPI: {row_sim['MPI_B']:.3f}")
                 st.caption(f"Dist: {row_sim['distanza_similitudine']:.3f}")
     
-    st.markdown("#### Confronto Radar")
+    st.markdown("#### Confronto Radar (5 Assi)")
     df_radar = pd.concat([
         df_filt[df_filt['label'] == selected_for_detail],
         df_simili
