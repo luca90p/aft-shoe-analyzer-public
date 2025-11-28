@@ -4,19 +4,19 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_samples, silhouette_score
+from sklearn.metrics import silhouette_samples
 
 # =========================
-#   FUNZIONI AFT (TRADUZIONE MATLAB)
+#   FUNZIONI AFT (CORE LOGIC)
 # =========================
 
 def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Replica calcola_indici(T) in MATLAB.
-    Richiede le colonne:
-    shock_abs_tallone, shock_abs_mesopiede,
-    energy_ret_tallone, energy_ret_mesopiede,
-    rigidezza_flex, peso, altezza_tallone, passo
+    Calcola gli indici biomeccanici normalizzati.
+    AGGIORNAMENTO V3 (Hybrid Weight):
+    - WeightIndex: Mix ponderato tra Punteggio Globale (70%) e Relativo (30%).
+      Garantisce che una scarpa oggettivamente leggera (es. Race) batta sempre 
+      una scarpa più pesante (es. Daily), anche se quest'ultima è "ottima per la sua categoria".
     """
 
     def safe_minmax(x: pd.Series) -> pd.Series:
@@ -26,10 +26,9 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
         denom = max(xmax - xmin, np.finfo(float).eps)
         return (x - xmin) / denom
 
-    # --- Shock & Energy ---
+    # --- 1. Shock & Energy (Base) ---
     w_heel = 0.4
     w_mid = 0.6
-
     S_heel = safe_minmax(df["shock_abs_tallone"])
     S_mid  = safe_minmax(df["shock_abs_mesopiede"])
     ER_h   = safe_minmax(df["energy_ret_tallone"])
@@ -38,69 +37,89 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df["ShockIndex"]  = (w_heel * S_heel + w_mid * S_mid) / (w_heel + w_mid)
     df["EnergyIndex"] = (w_heel * ER_h   + w_mid * ER_m)  / (w_heel + w_mid)
 
-    # --- Flex Index (campana adattiva per passo) ---
+    # --- 2. Flex Index ---
     Flex = df["rigidezza_flex"].astype(float).to_numpy()
     FlexIndex = np.zeros(len(df))
     passi = df["passo"].astype(str).str.lower().to_list()
 
     for i, tipo in enumerate(passi):
         if "race" in tipo:
-            Flex_opt = 20.0
-            sigma = 3.0
+            Flex_opt = 20.0; sigma = 3.0
         elif "tempo" in tipo:
-            Flex_opt = 17.0
-            sigma = 2.5
+            Flex_opt = 17.0; sigma = 2.5
         else:
-            Flex_opt = 13.0
-            sigma = 2.5
-
+            Flex_opt = 13.0; sigma = 2.5
         FlexIndex[i] = np.exp(-((Flex[i] - Flex_opt) ** 2) / (2 * sigma ** 2))
-
     df["FlexIndex"] = FlexIndex
 
-    # --- Weight Index ---
+    # --- 3. Weight Index (Hybrid Approach) ---
     W = df["peso"].astype(float).to_numpy()
-    W_ref = np.nanmin(W)
-    W_mean = np.nanmean(W)
+    
+    # -- Configurazione Pesi --
+    # MIX FACTOR: Quanto conta il peso assoluto vs quello relativo?
+    # 0.70 significa che il 70% del voto dipende dai grammi effettivi (fisica),
+    # il 30% dipende da quanto è brava rispetto alla categoria.
+    ALPHA_GLOBAL = 0.75 
+    ALPHA_LOCAL  = 1.0 - ALPHA_GLOBAL
+    
+    # Parametro curvatura (0.5 = radice quadrata, premia i medi)
+    GAMMA = 0.5
 
-    deltaW = W - W_ref
-    alpha = 0.04
-    beta = 0.4
-    W_norm = deltaW / (W_mean - W_ref)
-    WeightIndex = np.exp(-alpha * (W_norm * 100) ** beta)
-    WeightIndex = WeightIndex / np.nanmax(WeightIndex)
+    # A) CALCOLO SCORE GLOBALE (su tutto il database)
+    w_min_g = np.nanmin(W)
+    w_max_g = np.nanmax(W)
+    denom_g = max(w_max_g - w_min_g, 1.0)
+    
+    # Più è basso il peso, più alto il punteggio (1 - norm)
+    # Usiamo clip per sicurezza
+    w_norm_g = np.clip((w_max_g - W) / denom_g, 0, 1)
+    Score_Global = np.power(w_norm_g, GAMMA)
 
-    df["WeightIndex"] = WeightIndex
+    # B) CALCOLO SCORE RELATIVO (per categoria)
+    Score_Local = np.zeros(len(df))
+    passi_series = df["passo"].astype(str).str.lower()
+    
+    mask_race  = passi_series.str.contains("race", na=False).to_numpy()
+    mask_tempo = passi_series.str.contains("tempo", na=False).to_numpy()
+    mask_daily = ~(mask_race | mask_tempo)
+    masks = [mask_race, mask_tempo, mask_daily]
 
-    # --- StackFactor (stabilità + energy mod) ---
+    for mask in masks:
+        if np.any(mask):
+            w_subset = W[mask]
+            w_min_l = np.nanmin(w_subset)
+            w_max_l = np.nanmax(w_subset)
+            denom_l = max(w_max_l - w_min_l, 1.0)
+            
+            w_norm_l = np.clip((w_max_l - w_subset) / denom_l, 0, 1)
+            Score_Local[mask] = np.power(w_norm_l, GAMMA)
+            
+    # C) MIX FINALE
+    # Se una scarpa non ha categoria (improbabile), usiamo solo global
+    # Score_Local è inizializzato a 0, ma le maschere coprono tutto.
+    
+    df["WeightIndex"] = (ALPHA_GLOBAL * Score_Global) + (ALPHA_LOCAL * Score_Local)
+
+    # --- 4. StackFactor ---
     stack = df["altezza_tallone"].astype(float).to_numpy()
-
     EnergyMod = np.ones(len(df))
     StabilityMod = np.ones(len(df))
 
-    # EnergyMod: stack > 45
     mask_hi = stack > 45
     if np.any(mask_hi):
         EnergyMod[mask_hi] = 1.0 + 0.0006 * (np.minimum(stack[mask_hi], 50.0) - 45.0)
 
-    # EnergyMod: stack < 35
     mask_lo = stack < 35
     if np.any(mask_lo):
         EnergyMod[mask_lo] = 1.0 - 0.002 * (35.0 - np.maximum(stack[mask_lo], 30.0))
 
-    # clamp [0.985, 1.006]
     EnergyMod = np.clip(EnergyMod, 0.985, 1.006)
 
-    # StabilityMod: stack < 35
     if np.any(mask_lo):
         StabilityMod[mask_lo] = 1.0 / (1.0 + np.exp(-(stack[mask_lo] - 33.0) / 1.2))
 
-    # StabilityMod: stack > 45
     if np.any(mask_hi):
-        StabilityMod[mask_hi] = np.maximum(
-            0.93,
-            1.0 - 0.01 * (np.minimum(stack[mask_hi], 50.0) - 45.0)
-        )
+        StabilityMod[mask_hi] = np.maximum(0.93, 1.0 - 0.01 * (np.minimum(stack[mask_hi], 50.0) - 45.0))
 
     df["StackFactor"] = StabilityMod
     df["EnergyIndex"] = df["EnergyIndex"] * EnergyMod * StabilityMod
@@ -108,14 +127,10 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-
 def calcola_MPIB(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Replica calcola_MPIB(T).
-    Usa:
-    ShockIndex, EnergyIndex, FlexIndex, WeightIndex
-    Crea:
-    MPI_B e ordina in modo decrescente.
+    Calcola l'MPI_B base. I pesi verranno poi sovrascritti dall'utente
+    nella UI, ma serve una base per il primo load.
     """
     w_shock  = 0.20
     w_energy = 0.30
@@ -135,18 +150,33 @@ def calcola_MPIB(df: pd.DataFrame) -> pd.DataFrame:
 
 def esegui_clustering(df: pd.DataFrame):
     """
-    Traduzione di esegui_clustering(T).
-    Restituisce:
-    - df con colonna 'Cluster'
-    - cluster_summary (DataFrame con centroidi + descrizione)
+    Esegue clustering automatico (Elbow + Silhouette) usando gli indici biomeccanici.
     """
+
+    # Helper: Livelli descrittivi
+    def livello_index(val: float) -> str:
+        if val < 0.33: return "Basso"
+        elif val < 0.66: return "Medio"
+        else: return "Alto"
+
+    def descrizione_cluster_simplificata(row: pd.Series) -> str:
+        shock  = livello_index(row["Shock"])
+        energy = livello_index(row["Energy"])
+        flex   = livello_index(row["Flex"])
+        weight = livello_index(row["Weight"])
+        stack  = livello_index(row["Stack"])
+        return (f"Ammortizz.: {shock} | Energy: {energy} | "
+                f"Flex: {flex} | Peso: {weight} | Stack: {stack}")
+
     rng = 42
     np.random.seed(rng)
 
+    # Usiamo i 5 indici chiave
     X = df[["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor"]].to_numpy()
     labels_cols = ["Shock", "Energy", "Flex", "Weight", "Stack"]
 
-    K_values = np.arange(2, 11)  # 2:10
+    # Scelta K ottimale
+    K_values = np.arange(2, 11)
     SSE = []
     silh_mean = []
 
@@ -154,236 +184,172 @@ def esegui_clustering(df: pd.DataFrame):
         kmeans = KMeans(n_clusters=k, n_init=20, random_state=rng)
         idx_tmp = kmeans.fit_predict(X)
         SSE.append(kmeans.inertia_)
-        s = silhouette_samples(X, idx_tmp)
-        silh_mean.append(np.mean(s))
+        silh_mean.append(np.mean(silhouette_samples(X, idx_tmp)))
 
     SSE = np.array(SSE)
     silh_mean = np.array(silh_mean)
 
-    # Metodo del gomito: curvatura di log(SSE)
+    # Logica combinata Elbow/Silhouette
+    # Elbow (derivata seconda)
     logSSE = np.log(SSE)
-    d2 = np.gradient(np.gradient(logSSE))
-    k_elbow = K_values[np.argmin(d2)]
+    # Gestione array piccoli per gradient
+    if len(logSSE) > 2:
+        d2 = np.gradient(np.gradient(logSSE))
+        k_elbow = K_values[np.argmin(d2)]
+    else:
+        k_elbow = 3
 
-    # Metodo silhouette
     k_silh = K_values[np.argmax(silh_mean)]
 
-    # Decisione combinata
     k_elbow = max(2, min(int(k_elbow), int(K_values.max())))
     k_silh  = max(2, min(int(k_silh),  int(K_values.max())))
-    k_opt   = int(round(0.7 * k_silh + 0.3 * k_elbow))
+    
+    # Mix: 70% silhouette, 30% elbow
+    k_opt = int(round(0.7 * k_silh + 0.3 * k_elbow))
+    k_opt = max(2, min(k_opt, 7)) # Limitiamo a max 7 cluster per leggibilità
 
-    k_opt = min(k_opt, 7)  # limite massimo pratico
-
-    # K-means finale
+    # Clustering Finale
     kmeans_final = KMeans(n_clusters=k_opt, n_init=50, random_state=rng)
     idx = kmeans_final.fit_predict(X)
     C = kmeans_final.cluster_centers_
 
-    df["Cluster"] = idx + 1  # MATLAB usava 1..k
+    df["Cluster"] = idx + 1
 
+    # Summary
     cluster_summary = pd.DataFrame(C, columns=labels_cols)
     cluster_summary["Cluster"] = np.arange(1, k_opt + 1)
+    cluster_summary["Descrizione"] = cluster_summary.apply(descrizione_cluster_simplificata, axis=1)
 
-    # Descrizione automatica
-    descrizioni = []
-    for i in range(k_opt):
-        c = cluster_summary.iloc[i][labels_cols].to_numpy()
-        txt = ""
-
-        # Shock
-        if c[0] < 0.4:
-            txt += "ammortizzazione elevata, "
-        elif c[0] > 0.7:
-            txt += "scarpe più rigide, "
-        else:
-            txt += "ammortizzazione bilanciata, "
-
-        # Energy
-        if c[1] > 0.7:
-            txt += "elevato energy return, "
-        elif c[1] < 0.4:
-            txt += "ritorno di energia limitato, "
-        else:
-            txt += "energy return medio, "
-
-        # Flex
-        if c[2] > 0.7:
-            txt += "molto flessibili, "
-        elif c[2] < 0.4:
-            txt += "più rigide, "
-        else:
-            txt += "flessibilità moderata, "
-
-        # Weight
-        if c[3] > 0.8:
-            txt += "molto leggere, "
-        elif c[3] < 0.6:
-            txt += "più pesanti della media, "
-        else:
-            txt += "peso medio, "
-
-        # Stack
-        if c[4] > 0.8:
-            txt += "stack elevato (geometria moderna)."
-        elif c[4] < 0.5:
-            txt += "stack ridotto o tradizionale."
-        else:
-            txt += "stack nella fascia sweet spot (35–45 mm)."
-
-        descrizioni.append(f"Cluster {i+1}: {txt}")
-
-    cluster_summary["Descrizione"] = descrizioni
-
-    # Mappa descrizione nel df
     descr_map = dict(zip(cluster_summary["Cluster"], cluster_summary["Descrizione"]))
     df["ClusterDescrizione"] = df["Cluster"].map(descr_map)
 
     return df, cluster_summary
 
-def plot_radar_indices(df_comp, metrics, label_col="label"):
-    """
-    Grafico radar con i singoli indici (una linea per scarpa).
-    df_comp: dataframe con una riga per scarpa
-    metrics: lista di colonne numeriche (es. ShockIndex, EnergyIndex, ...)
-    label_col: colonna con il nome/etichetta della scarpa
-    """
-    import numpy as np
 
+def plot_radar_indices(df_comp, metrics, label_col="label"):
+    """ Grafico Radar Matplotlib """
+    import numpy as np
     n_metrics = len(metrics)
     angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False)
-    # chiudiamo il poligono aggiungendo il primo punto in fondo
     angles = np.concatenate([angles, [angles[0]]])
 
     fig, ax = plt.subplots(subplot_kw={"polar": True})
-    ax.set_theta_offset(np.pi / 2)      # parte da "su"
-    ax.set_theta_direction(-1)          # gira in senso orario
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
 
     for _, row in df_comp.iterrows():
         values = [row[m] for m in metrics]
-        # chiudiamo il poligono
         values = values + [values[0]]
         label = row[label_col]
-
         ax.plot(angles, values, linewidth=2, label=label)
         ax.fill(angles, values, alpha=0.15)
 
     ax.set_thetagrids(angles[:-1] * 180 / np.pi, metrics)
-    ax.set_ylim(0, 1)  # tutti gli indici sono normalizzati fra 0 e 1
+    ax.set_ylim(0, 1)
     ax.grid(True)
     ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
-
     return fig
-
 
 
 # =========================
 #   APP STREAMLIT
 # =========================
 
-st.set_page_config(page_title="AFT Explorer", layout="wide")
+st.set_page_config(page_title="AFT Explorer V2", layout="wide")
 
-st.title("AFT Shoe Database – MPI & Clustering")
-st.write("App basata sul CSV originale `database_AFT_20251124.csv`, con calcolo live di indici, MPI-B e cluster biomeccanici.")
+st.title("AFT Shoe Database – MPI & Clustering V2")
+st.markdown("Basata su `database_completo_AFT_20251124_clean.csv`. Nuova logica Weight Index (Categorical Relative + Convex).")
 
-file_name = "database_AFT_20251124.csv"
+# --- EXPANDER SPIEGAZIONI ---
+with st.expander("ℹ️ Dettagli sugli Indici (Aggiornato V2)"):
+    st.markdown("""
+**1. ShockIndex:** Ammortizzazione (40% Tallone, 60% Avampiede).  
+**2. EnergyIndex:** Ritorno energia (modulato dallo stack).  
+**3. FlexIndex:** Rigidità ottimale basata sul passo (Race vs Tempo vs Daily).  
+**4. WeightIndex (NUOVO):** - Confronta la scarpa **solo con la sua categoria** (Race con Race, Daily con Daily).
+   - Usa una curva "convessa" ($\gamma=0.5$): le scarpe di peso medio non vengono penalizzate troppo. Solo quelle molto pesanti (per la loro categoria) ricevono voti bassi.
+   - Premia al massimo solo la più leggera in assoluto della categoria.
+**5. StackFactor:** Penalità/Bonus stabilità in base all'altezza.
+    """)
+
+file_name = "database_completo_AFT_20251124_clean.csv"
 
 @st.cache_data
 def load_and_process(path):
-    df = pd.read_csv(path)
+    try:
+        df = pd.read_csv(path)
+    except FileNotFoundError:
+        st.error(f"File {path} non trovato. Assicurati che sia nella stessa cartella.")
+        return pd.DataFrame(), pd.DataFrame()
 
-    # Calcola indici biomeccanici
+    # Pipeline
     df = calcola_indici(df)
-
-    # Calcola MPI-B
-    df = calcola_MPIB(df)
-
-    # Clustering
+    df = calcola_MPIB(df) # Calcolo base
     df, cluster_summary = esegui_clustering(df)
 
-    # ======================================
-    # FORMATTING DECIMALS (INDICI & DROP)
-    # ======================================
-    
-    # Indici biomeccanici → 3 decimali
+    # Formatting
     index_cols = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor", "MPI_B"]
     for col in index_cols:
         if col in df.columns:
             df[col] = df[col].astype(float).round(3)
 
-    # Drop → 1 decimale
     if "drop" in df.columns:
         df["drop"] = df["drop"].astype(float).round(1)
 
-    # ======================================
+    price_cols = [c for c in df.columns if "prezzo" in c.lower()]
+    if price_cols:
+        df[price_cols[0]] = df[price_cols[0]].astype(float).round(0)
 
     return df, cluster_summary
 
-df, cluster_summary = load_and_process(file_name)
+df_raw, cluster_summary_raw = load_and_process(file_name)
 
-# ============================================
-# IMPOSTAZIONI UTENTE: PESI & APPOGGIO
-# ============================================
+if df_raw.empty:
+    st.stop()
 
-st.sidebar.header("Impostazioni personalizzate MPI")
+# Lavoriamo su una copia per i filtri dinamici
+df = df_raw.copy()
+PRICE_COLS = [c for c in df.columns if "prezzo" in c.lower()]
+PRICE_COL = PRICE_COLS[0] if PRICE_COLS else None
 
-# 1) Pesi tallone / avampiede
-heel_pct = st.sidebar.slider(
-    "Percentuale appoggio di tallone (%)",
-    min_value=0,
-    max_value=100,
-    value=40,
-    step=5
-)
+# =========================
+#   SIDEBAR: CONTROLLI
+# =========================
+st.sidebar.header("Impostazioni MPI Personalizzato")
+
+# 1. Slider Pesi
+heel_pct = st.sidebar.slider("Appoggio Tallone (%)", 0, 100, 40, 5)
 w_heel = heel_pct / 100.0
 w_mid = 1.0 - w_heel
-st.sidebar.write(f"Avampiede: {100 - heel_pct}%")
 
-# 2) Importanza dei singoli indici (scala discreta 1–5)
-w_shock  = st.sidebar.select_slider("Importanza Shock_abs",  options=[1,2,3,4,5], value=3)
-w_energy = st.sidebar.select_slider("Importanza Energy_ret", options=[1,2,3,4,5], value=3)
-w_flex   = st.sidebar.select_slider("Importanza Stiffness",  options=[1,2,3,4,5], value=3)
-w_weight = st.sidebar.select_slider("Importanza Weight",     options=[1,2,3,4,5], value=3)
+st.sidebar.markdown("---")
+st.sidebar.write("**Importanza Indici (1-5)**")
+w_shock  = st.sidebar.slider("Shock (Ammortizz.)", 1, 5, 3)
+w_energy = st.sidebar.slider("Energy (Ritorno)", 1, 5, 3)
+w_flex   = st.sidebar.slider("Stiffness (Flex)", 1, 5, 3)
+w_weight = st.sidebar.slider("Weight (Leggerezza)", 1, 5, 3)
 
-# Normalizza i pesi in modo che la SOMMA sia sempre = 1
+# Normalizzazione pesi
 raw_weights = np.array([w_shock, w_energy, w_flex, w_weight], dtype=float)
-tot = raw_weights.sum()
-
-if tot == 0:
-    # se l'utente mette tutto a zero, uso i default originari
-    norm_weights = np.array([0.20, 0.30, 0.20, 0.30])
-else:
-    norm_weights = raw_weights / tot
-
+tot = raw_weights.sum() if raw_weights.sum() > 0 else 1.0
+norm_weights = raw_weights / tot
 w_shock_eff, w_energy_eff, w_flex_eff, w_weight_eff = norm_weights
 
-st.sidebar.markdown(
-    f"""
-**Pesi effettivi MPI (somma = 1):**  
-- Shock_abs: `{w_shock_eff:.3f}`  
-- Energy_ret: `{w_energy_eff:.3f}`  
-- Stiffness: `{w_flex_eff:.3f}`  
-- Weight: `{w_weight_eff:.3f}`
-"""
+st.sidebar.info(
+    f"Pesi Reali: Shock {w_shock_eff:.2f}, Energy {w_energy_eff:.2f}, "
+    f"Flex {w_flex_eff:.2f}, Weight {w_weight_eff:.2f}"
 )
 
-# Normalizza i pesi degli indici (somma = 1)
-tot = w_shock + w_energy + w_flex + w_weight
-if tot == 0:
-    tot = 1.0
-w_shock  /= tot
-w_energy /= tot
-w_flex   /= tot
-w_weight /= tot
+# =========================
+#   RICALCOLO LIVE (MPI)
+# =========================
+# Nota: WeightIndex e FlexIndex sono statici (o meglio, calcolati intelligentemente in load_and_process),
+# mentre Shock e Energy dipendono dallo slider tallone/avampiede.
 
-# 3) Ricalcolo Shock/Energy in base a tallone/avampiede
-def safe_minmax_series(x: pd.Series) -> pd.Series:
-    x = x.astype(float)
-    xmin = x.min()
-    xmax = x.max()
-    denom = max(xmax - xmin, 1e-12)
-    return (x - xmin) / denom
+def safe_minmax_series(x):
+    return (x - x.min()) / max(x.max() - x.min(), 1e-12)
 
+# Ricalcolo Shock/Energy in base a tallone/avampiede
 S_heel = safe_minmax_series(df["shock_abs_tallone"])
 S_mid  = safe_minmax_series(df["shock_abs_mesopiede"])
 ER_h   = safe_minmax_series(df["energy_ret_tallone"])
@@ -391,170 +357,109 @@ ER_m   = safe_minmax_series(df["energy_ret_mesopiede"])
 
 df["ShockIndex"]  = (w_heel * S_heel + w_mid * S_mid)
 df["EnergyIndex"] = (w_heel * ER_h   + w_mid * ER_m)
+# Riscaliamo 0-1
+df["ShockIndex"] = safe_minmax_series(df["ShockIndex"])
+df["EnergyIndex"] = safe_minmax_series(df["EnergyIndex"])
 
-# Riscaliamo a [0,1]
-for col in ["ShockIndex", "EnergyIndex"]:
-    s = df[col]
-    df[col] = (s - s.min()) / max(s.max() - s.min(), 1e-12)
-
-# 4) Ricalcolo MPI_B con i pesi scelti dall’utente
+# Ricalcolo MPI_B
 df["MPI_B"] = (
     w_shock_eff  * df["ShockIndex"] +
     w_energy_eff * df["EnergyIndex"] +
     w_flex_eff   * df["FlexIndex"] +
     w_weight_eff * df["WeightIndex"]
-)
+).round(3)
 
-
-# 5) Arrotondamenti (indici a 3 decimali, drop a 1)
-index_cols = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor", "MPI_B"]
-for col in index_cols:
-    if col in df.columns:
-        df[col] = df[col].astype(float).round(3)
-
-if "drop" in df.columns:
-    df["drop"] = df["drop"].astype(float).round(1)
-
-# 6) (Opzionale) ricalcolo cluster con i nuovi indici
-df, cluster_summary = esegui_clustering(df)
-
-# ============================================
-
-st.success(f"Database caricato e processato. Numero scarpe: {len(df)}")
-st.write("Cluster trovati automaticamente:")
-st.dataframe(cluster_summary, use_container_width=True)
-
-# Label leggibile scarpa
-def make_label(row):
-    if "versione" in row and not pd.isna(row["versione"]):
-        try:
-            v = int(row["versione"])
-            return f"{row['marca']} - {row['modello']} (v.{v})"
-        except Exception:
-            return f"{row['marca']} - {row['modello']}"
+# Value Index
+if PRICE_COL:
+    # Calcoliamo Value Index (MPI / Prezzo)
+    # Filtriamo prezzi nulli o zero per evitare crash
+    valid_p = (df[PRICE_COL] > 10) # almeno 10 euro
+    vals = df.loc[valid_p, "MPI_B"] / df.loc[valid_p, PRICE_COL]
+    
+    # Normalizziamo 0-1
+    if not vals.empty:
+        v_min, v_max = vals.min(), vals.max()
+        df.loc[valid_p, "ValueIndex"] = ((vals - v_min) / (v_max - v_min)).round(3)
     else:
-        return f"{row['marca']} - {row['modello']}"
+        df["ValueIndex"] = 0.0
+else:
+    df["ValueIndex"] = 0.0
 
-df = df.copy()
+# Label
+def make_label(row):
+    lbl = f"{row['marca']} {row['modello']}"
+    if pd.notna(row.get("versione")):
+        lbl += f" v{int(row['versione'])}"
+    return lbl
+
 df["label"] = df.apply(make_label, axis=1)
 
 # =========================
-#   FILTRI SIDEBAR
+#   INTERFACCIA MAIN
 # =========================
 
-st.sidebar.header("Filtri")
+st.subheader("Cluster Biomeccanici (Profilo Medio)")
+st.dataframe(cluster_summary_raw, use_container_width=True)
 
-marche = ["Tutte"] + sorted(df["marca"].unique().tolist())
-marca_sel = st.sidebar.selectbox("Marca", marche)
+# FILTRI
+st.sidebar.markdown("---")
+st.sidebar.header("Filtra Database")
+all_brands = ["Tutte"] + sorted(df["marca"].unique())
+sel_brand = st.sidebar.selectbox("Marca", all_brands)
 
-passi = ["Tutti"] + sorted(df["passo"].unique().tolist())
-passo_sel = st.sidebar.selectbox("Categoria/Passo (AFT)", passi)
-
-cluster_vals = ["Tutti"] + sorted(df["Cluster"].unique().tolist())
-cluster_sel = st.sidebar.selectbox("Cluster biomeccanico", cluster_vals)
+all_passi = ["Tutti"] + sorted(df["passo"].unique())
+sel_passo = st.sidebar.selectbox("Categoria", all_passi)
 
 df_filt = df.copy()
-if marca_sel != "Tutte":
-    df_filt = df_filt[df_filt["marca"] == marca_sel]
+if sel_brand != "Tutte":
+    df_filt = df_filt[df_filt["marca"] == sel_brand]
+if sel_passo != "Tutti":
+    df_filt = df_filt[df_filt["passo"] == sel_passo]
 
-if passo_sel != "Tutti":
-    df_filt = df_filt[df_filt["passo"] == passo_sel]
+st.subheader(f"Database ({len(df_filt)} scarpe)")
 
-if cluster_sel != "Tutti":
-    df_filt = df_filt[df_filt["Cluster"] == cluster_sel]
+cols_view = ["label", "passo", "peso", "MPI_B", "ValueIndex", 
+             "ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "ClusterDescrizione"]
+if PRICE_COL: cols_view.insert(4, PRICE_COL)
 
-st.subheader("Tabella filtrata")
-st.write(f"Scarpe mostrate: {len(df_filt)}")
-
-cols_tabella = [
-    "marca", "modello", "versione", "passo",
-    "MPI_B", "Cluster",
-    "ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor",
-    "peso", "drop", "altezza_tallone", "altezza_mesopiede"
-]
-cols_tabella = [c for c in cols_tabella if c in df_filt.columns]
-
-st.dataframe(df_filt[cols_tabella], use_container_width=True)
+st.dataframe(
+    df_filt[cols_view].sort_values("MPI_B", ascending=False), 
+    use_container_width=True
+)
 
 # =========================
-#   DETTAGLIO SCARPA
+#   CONFRONTO E DETTAGLIO
 # =========================
+col_sx, col_dx = st.columns([1, 2])
 
-st.subheader("Dettaglio scarpa")
+with col_sx:
+    st.markdown("### Dettaglio Scarpa")
+    if not df_filt.empty:
+        sel_shoe = st.selectbox("Scegli scarpa", df_filt["label"].unique())
+        row = df_filt[df_filt["label"] == sel_shoe].iloc[0]
+        
+        st.metric("MPI-B Score", f"{row['MPI_B']:.3f}")
+        st.write(f"**Categoria:** {row['passo']}")
+        st.write(f"**Peso:** {row['peso']}g (W.Idx: {row['WeightIndex']:.2f})")
+        st.write(f"**Cluster:** {row['ClusterDescrizione']}")
+        
+        st.write("---")
+        st.write("**Indici:**")
+        st.progress(float(row['ShockIndex']), text=f"Shock: {row['ShockIndex']:.2f}")
+        st.progress(float(row['EnergyIndex']), text=f"Energy: {row['EnergyIndex']:.2f}")
+        st.progress(float(row['FlexIndex']), text=f"Flex: {row['FlexIndex']:.2f}")
+        st.progress(float(row['WeightIndex']), text=f"Weight: {row['WeightIndex']:.2f}")
+    else:
+        st.warning("Nessuna scarpa nei filtri.")
 
-if not df_filt.empty:
-    scelta = st.selectbox(
-        "Seleziona una scarpa",
-        df_filt["label"].tolist()
-    )
-    scarpa = df_filt[df_filt["label"] == scelta].iloc[0]
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.markdown(f"### {scarpa['marca']} {scarpa['modello']}")
-        if "versione" in scarpa and not pd.isna(scarpa["versione"]):
-            st.write(f"Versione: {int(scarpa['versione'])}")
-        st.write(f"Passo / categoria (AFT): {scarpa['passo']}")
-        st.write(f"Peso: {scarpa['peso']} g")
-        st.write(f"Drop: {scarpa['drop']} mm")
-        st.write(f"Stack (tallone): {scarpa['altezza_tallone']} mm")
-
-    with col2:
-        st.write("**Indici biomeccanici**")
-        st.write(f"ShockIndex: {scarpa['ShockIndex']:.3f}")
-        st.write(f"EnergyIndex: {scarpa['EnergyIndex']:.3f}")
-        st.write(f"FlexIndex: {scarpa['FlexIndex']:.3f}")
-        st.write(f"WeightIndex: {scarpa['WeightIndex']:.3f}")
-        st.write(f"StackFactor: {scarpa['StackFactor']:.3f}")
-
-    with col3:
-        st.write("**Performance & cluster**")
-        st.metric("MPI-B", f"{scarpa['MPI_B']:.3f}")
-        st.write(f"Cluster: {scarpa['Cluster']}")
-        st.write(scarpa["ClusterDescrizione"])
-else:
-    st.info("Nessuna scarpa corrisponde ai filtri selezionati.")
-
-# =========================
-#   CONFRONTO SCARPE
-# =========================
-
-st.subheader("Confronto scarpe")
-
-if len(df_filt) >= 2:
-    selezione_confronto = st.multiselect(
-        "Seleziona fino a 3 scarpe da confrontare",
-        df_filt["label"].tolist(),
-        max_selections=3
-    )
-
-    if selezione_confronto:
-        df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
-
-        # tabella numerica come prima (utile da leggere)
-        colonne_confronto = [
-            "label", "marca", "modello", "versione", "passo",
-            "MPI_B", "Cluster",
-            "ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor",
-            "peso", "drop", "altezza_tallone", "altezza_mesopiede"
-        ]
-        colonne_confronto = [c for c in colonne_confronto if c in df_comp.columns]
-
-        st.write("Tabella comparativa (MPI + indici)")
-        st.dataframe(df_comp[colonne_confronto], use_container_width=True)
-
-        # --- GRAFICO RADAR SUI 5 INDICI ---
-        metrics = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-        metrics = [m for m in metrics if m in df_comp.columns]
-
-        if metrics:
-            st.write("Profilo radar sugli indici biomeccanici")
-            fig = plot_radar_indices(df_comp, metrics, label_col="label")
+with col_dx:
+    st.markdown("### Confronto Radar")
+    if len(df_filt) > 0:
+        cmp_shoes = st.multiselect("Confronta con...", df_filt["label"].unique(), max_selections=3)
+        if cmp_shoes:
+            df_cmp = df_filt[df_filt["label"].isin(cmp_shoes)]
+            metrics = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+            fig = plot_radar_indices(df_cmp, metrics)
             st.pyplot(fig)
         else:
-            st.info("Indici per il radar non disponibili.")
-    else:
-        st.info("Seleziona almeno una scarpa per il confronto.")
-else:
-    st.info("Servono almeno 2 scarpe nei filtri attuali per fare un confronto.")
+            st.info("Seleziona scarpe dal menu qui sopra per il radar.")
