@@ -191,6 +191,7 @@ def esegui_clustering(df: pd.DataFrame):
 
     return df, cluster_summary
 
+
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     """ Scatter plot MPI-B vs Prezzo usando Plotly (solo hover). """
     
@@ -240,17 +241,8 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     
     return fig
 
-# =============================================
-#   NUOVA FUNZIONE RADAR CHART CON STILI
-# =============================================
 def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Confronto Biomeccanico (Radar)"):
-    """ 
-    Crea un Radar Chart interattivo con Plotly.
-    MIGLIORAMENTI:
-    1. Z-Order: Disegna la scarpa principale (riga 0) per ultima (sopra).
-    2. Stili distinti: Linea spessa/rossa per la principale, sottile/pastello per le altre.
-    3. Trasparenze: Fill molto leggero per le secondarie per evitare confusione.
-    """
+    """ Crea un Radar Chart interattivo con Plotly. """
     
     fig = go.Figure()
     
@@ -263,15 +255,13 @@ def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Confronto Biom
     
     categories = [metrics_readable.get(m, m) for m in metrics]
     
-    # Colori per le scarpe di confronto (Simili)
-    comparison_colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd'] # Blu, Verde, Arancio, Viola
+    comparison_colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd']
     
-    # 1. DISEGNA PRIMA LE SCARPE DI CONFRONTO (Indici 1, 2, 3...)
-    # Così vanno "sotto" nel grafico
+    # 1. DISEGNA PRIMA LE SCARPE DI CONFRONTO
     for i in range(1, len(df_shoes)):
         row = df_shoes.iloc[i]
         values = [float(row[m]) for m in metrics]
-        values += [values[0]] # Chiudi poligono
+        values += [values[0]]
         categories_closed = categories + [categories[0]]
         
         color = comparison_colors[(i-1) % len(comparison_colors)]
@@ -281,14 +271,13 @@ def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Confronto Biom
             theta=categories_closed,
             fill='toself',
             name=f"{row['label']} (Simile)",
-            line=dict(color=color, width=1, dash='dot'), # Linea sottile e tratteggiata
+            line=dict(color=color, width=1, dash='dot'),
             fillcolor=color,
-            opacity=0.3, # Molto trasparente per non coprire
+            opacity=0.3,
             hoveron='points+fills'
         ))
 
-    # 2. DISEGNA PER ULTIMA LA SCARPA SELEZIONATA (Indice 0)
-    # Così va "sopra" tutto
+    # 2. DISEGNA PER ULTIMA LA SCARPA SELEZIONATA
     if not df_shoes.empty:
         row = df_shoes.iloc[0]
         values = [float(row[m]) for m in metrics]
@@ -299,10 +288,10 @@ def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Confronto Biom
             r=values,
             theta=categories_closed,
             fill='toself',
-            name=f"★ {row['label']} (Selezionata)", # Stella nel nome
-            line=dict(color='red', width=4), # Linea rossa e spessa
-            fillcolor='rgba(255, 0, 0, 0.2)', # Rosso semi-trasparente
-            opacity=0.9 # Opacità alta per la linea
+            name=f"★ {row['label']}",
+            line=dict(color='red', width=4),
+            fillcolor='rgba(255, 0, 0, 0.1)',
+            opacity=0.9
         ))
     
     fig.update_layout(
@@ -317,7 +306,7 @@ def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Confronto Biom
         ),
         title=dict(text=title, x=0.5),
         showlegend=True,
-        legend=dict(orientation="h", y=-0.1) # Legenda orizzontale sotto
+        legend=dict(orientation="h", y=-0.1)
     )
     
     return fig
@@ -552,7 +541,7 @@ else:
 
 
 # ============================================
-# 3. SCHEDA DETTAGLIO
+# 3. SCHEDA DETTAGLIO (con Stelle e Valori)
 # ============================================
 
 st.markdown("---")
@@ -566,7 +555,8 @@ if selected_for_detail:
     except IndexError:
         st.stop()
     
-    with st.container():
+    # UTILIZZO DI CONTAINER CON BORDO PER EVITARE IL FADE-OUT (SFUMATURA)
+    with st.container(border=True):
         col_sx, col_dx = st.columns([1, 2])
         
         with col_sx:
@@ -590,15 +580,26 @@ if selected_for_detail:
             
             c1, c2 = st.columns(2)
             with c1:
-                st.caption("Shock Absorption")
-                st.progress(float(row['ShockIndex_calc']))
-                st.caption("Flexibility")
-                st.progress(float(row['FlexIndex']))
+                # Shock
+                val_shock = float(row['ShockIndex_calc'])
+                st.caption(f"Shock Abs: {val_shock:.2f}")
+                st.progress(val_shock)
+                
+                # Flex
+                val_flex = float(row['FlexIndex'])
+                st.caption(f"Flexibility: {val_flex:.2f}")
+                st.progress(val_flex)
+                
             with c2:
-                st.caption("Energy Return")
-                st.progress(float(row['EnergyIndex_calc']))
-                st.caption("Weight Efficiency")
-                st.progress(float(row['WeightIndex']))
+                # Energy
+                val_energy = float(row['EnergyIndex_calc'])
+                st.caption(f"Energy Ret: {val_energy:.2f}")
+                st.progress(val_energy)
+                
+                # Weight
+                val_weight = float(row['WeightIndex'])
+                st.caption(f"Weight Eff: {val_weight:.2f}")
+                st.progress(val_weight)
 
 # ============================================
 # 4. MODELLI SIMILI & RADAR
@@ -611,28 +612,28 @@ cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
 df_simili = trova_scarpe_simili(df_filt, selected_for_detail, cols_simil, n_simili=3)
 
 if not df_simili.empty:
+    # 1. Mostra le card dei modelli simili
     cols = st.columns(3)
     for i, (idx, row_sim) in enumerate(df_simili.iterrows()):
         with cols[i]:
-            # Nome modello con versione
-            label_sim = row_sim['label']
-            st.markdown(f"**{label_sim}**")
-            
-            diff_prezzo = row_sim[PRICE_COL] - row[PRICE_COL]
-            icon = "🔴" if diff_prezzo > 0 else "🟢"
-            st.write(f"{row_sim[PRICE_COL]:.0f}€ ({icon} {diff_prezzo:+.0f}€)")
-            st.caption(f"MPI: {row_sim['MPI_B']:.3f}")
+            # CONTAINER CON BORDO ANCHE QUI
+            with st.container(border=True):
+                label_sim = row_sim['label']
+                st.markdown(f"**{label_sim}**")
+                
+                diff_prezzo = row_sim[PRICE_COL] - row[PRICE_COL]
+                icon = "🔴" if diff_prezzo > 0 else "🟢"
+                st.write(f"{row_sim[PRICE_COL]:.0f}€ ({icon} {diff_prezzo:+.0f}€)")
+                st.caption(f"MPI: {row_sim['MPI_B']:.3f}")
+                st.caption(f"Dist: {row_sim['distanza_similitudine']:.3f}")
     
     st.markdown("#### Confronto Radar")
-    
-    # Prepara i dati per il Radar Plot (Originale + Simili)
-    # La scarpa selezionata è sempre la prima (iloc[0]) nel df_radar
+    # 2. Radar Plot
     df_radar = pd.concat([
         df_filt[df_filt['label'] == selected_for_detail],
         df_simili
     ], ignore_index=True)
     
-    # Plotly Radar Chart STYLIZED
     fig_radar = plot_radar_comparison_plotly_styled(df_radar, cols_simil)
     st.plotly_chart(fig_radar, use_container_width=True)
             
