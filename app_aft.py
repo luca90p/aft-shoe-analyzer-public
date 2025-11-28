@@ -8,71 +8,8 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
 
 # =========================
-#   FUNZIONI AFT (EVIDENCE-BASED LOGIC)
+#   FUNZIONI AFT (CORE LOGIC)
 # =========================
-
-def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calcola il 'Drive Index' (0-1) basato sull'effetto Teeter-Totter.
-    EVIDENZA SCIENTIFICA:
-    - La piastra (Plate) funziona solo in sinergia con il Rocker (effetto leva).
-    - La schiuma (Energy Return) è il driver primario del risparmio energetico.
-    """
-    
-    # 1. Score Piastra (Plate)
-    def score_plate(val):
-        val = str(val).lower()
-        if 'carbon' in val: return 1.0       # Carbonio: max rigidità/ritorno
-        if 'carbitex' in val: return 1.0
-        if 'fiberglass' in val: return 0.7   # Vetro: buona risposta
-        if 'plastic' in val or 'tpu' in val or 'nylon' in val: return 0.5 # Plastica: stabilità, poca spinta
-        return 0.1 # Nessuna piastra
-
-    S_Plate = df['piastra'].apply(score_plate)
-
-    # 2. Score Rocker (Geometria)
-    # Estraiamo l'altezza della punta (Toe Spring) come driver della transizione
-    def score_rocker(val):
-        if pd.isna(val) or str(val) in ['nan', '#N/D']: return 0.0
-        try:
-            # Formato '6x10' -> prendiamo 6 (altezza)
-            clean_val = str(val).replace(',', '.')
-            parts = clean_val.split('x')
-            if len(parts) >= 1:
-                h = float(parts[0])
-                # In letteratura, rocker > 50mm di raggio o >6-8mm di altezza sono significativi.
-                # Normalizziamo su un max di 10mm.
-                return min(h / 10.0, 1.0)
-            return 0.0
-        except:
-            return 0.0
-            
-    S_Rocker = df['rocker'].apply(score_rocker)
-
-    # 3. Score Schiuma (Energy Return)
-    # Usiamo l'Energy Return già calcolato (0-1) come proxy della qualità della schiuma (PEBA vs EVA)
-    S_Foam = df['EnergyIndex'] 
-
-    # 4. Score Rigidità Longitudinale (Necessaria per la leva)
-    # Normalizziamo la rigidità flex (es. 100-300 N/mm)
-    # Dagli studi: rigidità ottimale ~ 200-250 N/mm per l'economia di corsa (M)
-    flex_val = pd.to_numeric(df['rigidezza_flex'], errors='coerce').fillna(100)
-    S_Stiffness = (flex_val - 50) / (300 - 50) # Min 50, Max 300
-    S_Stiffness = S_Stiffness.clip(0, 1)
-
-    # --- FORMULA DRIVE (Teeter-Totter Effect) ---
-    # La spinta meccanica è data dall'interazione (Moltiplicazione) tra Piastra, Rocker e Rigidità.
-    # Se manca uno di questi, l'effetto leva svanisce.
-    # La schiuma (Foam) è un additivo energetico diretto.
-    
-    Mechanical_Drive = S_Plate * S_Rocker * S_Stiffness
-    Foam_Drive = S_Foam
-    
-    # Peso finale: 60% Meccanica (Leva), 40% Schiuma (Rimbalzo)
-    df['DriveIndex'] = (0.6 * Mechanical_Drive) + (0.4 * Foam_Drive)
-    
-    return df
-
 
 def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     """ Calcola gli indici biomeccanici normalizzati. """
@@ -95,8 +32,7 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df["ShockIndex"]  = (w_heel * S_heel + w_mid * S_mid) / (w_heel + w_mid)
     df["EnergyIndex"] = (w_heel * ER_h   + w_mid * ER_m)  / (w_heel + w_mid)
 
-    # --- 2. Flex Index (Curva a U) ---
-    # Studi: La rigidità non è lineare. Troppa rigidità senza velocità peggiora l'economia.
+    # --- 2. Flex Index ---
     Flex = df["rigidezza_flex"].astype(float).to_numpy()
     FlexIndex = np.zeros(len(df))
     passi = df["passo"].astype(str).str.lower().to_list()
@@ -104,48 +40,128 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     for i, tipo in enumerate(passi):
         if "race" in tipo:
             # Per Race: Più rigido è meglio (fino a un punto), poi plateau
-            # Usiamo una sigmoide che premia la rigidità alta
-            FlexIndex[i] = 1 / (1 + np.exp(-(Flex[i] - 200) / 50)) 
+            Flex_opt = 20.0; sigma = 3.0
+        elif "tempo" in tipo:
+            Flex_opt = 17.0; sigma = 2.5
         else:
-            # Per Daily/Tempo: Curva Gaussiana (ottimo intermedio ~150)
-            FlexIndex[i] = np.exp(-((Flex[i] - 150) ** 2) / (2 * 50 ** 2))
-            
+            # Per Daily: Ottimo intermedio
+            Flex_opt = 13.0; sigma = 2.5
+        FlexIndex[i] = np.exp(-((Flex[i] - Flex_opt) ** 2) / (2 * sigma ** 2))
     df["FlexIndex"] = FlexIndex
 
-    # --- 3. Weight Index (Metabolic Cost Rule) ---
-    # Studi: +100g = +1% consumo ossigeno. 
-    # Usiamo una funzione esponenziale che penalizza pesantemente ogni grammo extra sopra i 200g.
+    # --- 3. Weight Index (Hybrid Approach) ---
     W = df["peso"].astype(float).to_numpy()
-    W_ref = 180.0 # Peso di riferimento "Elite" (g)
     
-    # Decay factor basato sul 1% per 100g
-    # Score = exp(-k * (Weight - Ref))
-    k = 0.005 # Calibrato per dare ~0.6 a 280g (tipica daily) e ~0.9 a 200g
-    
-    WeightIndex = np.exp(-k * (W - W_ref))
-    WeightIndex = np.clip(WeightIndex, 0, 1) # Clamp
-    
-    df["WeightIndex"] = WeightIndex
+    ALPHA_GLOBAL = 0.75 
+    ALPHA_LOCAL  = 1.0 - ALPHA_GLOBAL
+    GAMMA = 0.5 
 
-    # --- 4. StackFactor (Stabilità vs Cushioning) ---
+    # A) CALCOLO SCORE GLOBALE
+    w_min_g = np.nanmin(W)
+    w_max_g = np.nanmax(W)
+    denom_g = max(w_max_g - w_min_g, 1.0)
+    w_norm_g = np.clip((w_max_g - W) / denom_g, 0, 1)
+    Score_Global = np.power(w_norm_g, GAMMA)
+
+    # B) CALCOLO SCORE RELATIVO
+    Score_Local = np.zeros(len(df))
+    passi_series = df["passo"].astype(str).str.lower()
+    
+    mask_race  = passi_series.str.contains("race", na=False).to_numpy()
+    mask_tempo = passi_series.str.contains("tempo", na=False).to_numpy()
+    mask_daily = ~(mask_race | mask_tempo)
+    masks = [mask_race, mask_tempo, mask_daily]
+
+    for mask in masks:
+        if np.any(mask):
+            w_subset = W[mask]
+            w_min_l = np.nanmin(w_subset)
+            w_max_l = np.nanmax(w_subset)
+            denom_l = max(w_max_l - w_min_l, 1.0)
+            
+            w_norm_l = np.clip((w_max_l - w_subset) / denom_l, 0, 1)
+            Score_Local[mask] = np.power(w_norm_l, GAMMA)
+            
+    # C) MIX FINALE
+    df["WeightIndex"] = (ALPHA_GLOBAL * Score_Global) + (ALPHA_LOCAL * Score_Local)
+
+    # --- 4. StackFactor ---
     stack = df["altezza_tallone"].astype(float).to_numpy()
-    
-    # Penalità stabilità per stack alti (>40mm) secondo studio "Effects of stack height"
+    EnergyMod = np.ones(len(df))
     StabilityMod = np.ones(len(df))
-    mask_hi = stack > 40
-    if np.any(mask_hi):
-        # Decadimento lineare sopra i 40mm
-        StabilityMod[mask_hi] = np.maximum(0.85, 1.0 - 0.015 * (stack[mask_hi] - 40.0))
-    
-    df["StackFactor"] = StabilityMod
-    
-    # L'Energy Index beneficia dello stack alto (più schiuma = più ritorno), ma perde in stabilità
-    # Bilanciamo i due fattori
-    df["EnergyIndex"] = df["EnergyIndex"] * StabilityMod
 
-    # --- 5. DRIVE INDEX (Calcolo Avanzato) ---
+    mask_hi = stack > 45
+    if np.any(mask_hi):
+        EnergyMod[mask_hi] = 1.0 + 0.0006 * (np.minimum(stack[mask_hi], 50.0) - 45.0)
+
+    mask_lo = stack < 35
+    if np.any(mask_lo):
+        EnergyMod[mask_lo] = 1.0 - 0.002 * (35.0 - np.maximum(stack[mask_lo], 30.0))
+
+    EnergyMod = np.clip(EnergyMod, 0.985, 1.006)
+
+    if np.any(mask_lo):
+        StabilityMod[mask_lo] = 1.0 / (1.0 + np.exp(-(stack[mask_lo] - 33.0) / 1.2))
+
+    if np.any(mask_hi):
+        StabilityMod[mask_hi] = np.maximum(0.93, 1.0 - 0.01 * (np.minimum(stack[mask_hi], 50.0) - 45.0))
+
+    df["StackFactor"] = StabilityMod
+    df["EnergyIndex"] = df["EnergyIndex"] * EnergyMod * StabilityMod
+    df["FlexIndex"]   = df["FlexIndex"]   * StabilityMod
+    
+    # --- 5. DRIVE INDEX (NUOVO) ---
     df = calcola_drive_index(df)
 
+    return df
+
+def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcola il 'Drive Index' (0-1) basato su Piastra, Rocker (Altezza), Torsione e Grip.
+    """
+    # 1. Punteggio Piastra
+    def score_plate(val):
+        val = str(val).lower()
+        if 'carbon' in val: return 1.0
+        if any(x in val for x in ['plastic', 'nylon', 'fiber', 'pebax', 'airzoom']): return 0.6
+        return 0.0
+
+    df['S_Plate'] = df['piastra'].apply(score_plate)
+
+    # 2. Punteggio Rocker (Estrae la PRIMA parte = Altezza/Toe Spring)
+    def score_rocker(val):
+        if pd.isna(val) or str(val) in ['nan', '#N/D']: return 0.0
+        try:
+            clean_val = str(val).replace(',', '.')
+            parts = clean_val.split('x')
+            if len(parts) >= 1:
+                height = float(parts[0]) 
+                return min(height / 8.0, 1.0)
+            return 0.0
+        except:
+            return 0.0
+            
+    df['S_Rocker'] = df['rocker'].apply(score_rocker)
+
+    # 3. Punteggio Torsione
+    torsion = pd.to_numeric(df['rigidezza_torsionale'], errors='coerce').fillna(2)
+    df['S_Torsion'] = (torsion - 2) / 3.0
+    df['S_Torsion'] = df['S_Torsion'].clip(0, 1)
+
+    # 4. Punteggio Grip
+    grip = pd.to_numeric(df['test_trazione'], errors='coerce')
+    min_g, max_g = grip.min(), grip.max()
+    df['S_Grip'] = (grip - min_g) / (max_g - min_g)
+    df['S_Grip'] = df['S_Grip'].fillna(0.5)
+
+    # FORMULA FINALE DRIVE
+    df['DriveIndex'] = (
+        0.30 * df['S_Plate'] +
+        0.30 * df['S_Rocker'] +
+        0.20 * df['S_Torsion'] +
+        0.20 * df['S_Grip']
+    )
+    
     return df
 
 def calcola_MPIB(df: pd.DataFrame) -> pd.DataFrame:
@@ -179,16 +195,15 @@ def esegui_clustering(df: pd.DataFrame):
         energy = livello_index(row["Energy"])
         flex   = livello_index(row["Flex"])
         weight = livello_index(row["Weight"])
-        drive  = livello_index(row["Drive"]) # Aggiunto Drive alla descrizione
-        return (f"Ammortizz.: {shock} | Drive: {drive} | "
-                f"Flex: {flex} | Peso: {weight}")
+        stack  = livello_index(row["Stack"])
+        return (f"Ammortizz.: {shock} | Energy: {energy} | "
+                f"Flex: {flex} | Peso: {weight} | Stack: {stack}")
 
     rng = 42
     np.random.seed(rng)
 
-    # Includiamo DriveIndex nel clustering
-    X = df[["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "DriveIndex"]].to_numpy()
-    labels_cols = ["Shock", "Energy", "Flex", "Weight", "Drive"]
+    X = df[["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor"]].to_numpy()
+    labels_cols = ["Shock", "Energy", "Flex", "Weight", "Stack"]
 
     K_values = np.arange(2, 11)
     SSE = []; silh_mean = []
@@ -234,12 +249,10 @@ def esegui_clustering(df: pd.DataFrame):
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     """ Scatter plot MPI-B vs Prezzo usando Plotly (solo hover). """
     
-    # Crea la colonna per l'evidenziazione
     df_val['Colore_Evidenziazione'] = df_val['label'].apply(
         lambda x: 'Selezionato' if x in selected_points_labels else 'Mercato'
     )
     
-    # Ordina per portare i punti selezionati in primo piano nel grafico
     df_val = df_val.sort_values(by='Colore_Evidenziazione', ascending=True).reset_index(drop=True)
     
     df_val['hover_text'] = df_val.apply(
@@ -283,9 +296,7 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     return fig
 
 def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Confronto Biomeccanico (Radar)"):
-    """ 
-    Crea un Radar Chart interattivo con Plotly.
-    """
+    """ Crea un Radar Chart interattivo con Plotly. """
     
     fig = go.Figure()
     
@@ -298,7 +309,6 @@ def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Confronto Biom
     }
     
     categories = [metrics_readable.get(m, m) for m in metrics]
-    
     comparison_colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd']
     
     # 1. DISEGNA PRIMA LE SCARPE DI CONFRONTO
@@ -387,6 +397,31 @@ def render_stars(value):
 st.set_page_config(page_title="AFT Explorer V2", layout="wide")
 
 st.title("AFT Shoe Database – MPI & Clustering V2")
+
+# EXPANDER SCIENTIFICO
+with st.expander("📚 La Scienza dietro l'Algoritmo AFT (Evidence-Based)"):
+    st.markdown("""
+    L'algoritmo di questa app non è casuale, ma si basa su studi biomeccanici recenti. Ecco come vengono calcolati i punteggi:
+
+    ### 1. Il "Costo" del Peso (Weight Penalty) ⚖️
+    La letteratura scientifica dimostra che ogni **100g di peso extra** ai piedi aumentano il costo metabolico dell'**1%**.
+    * **Come funziona qui:** Usiamo una funzione di decadimento esponenziale. Una scarpa sotto i 200g ottiene punteggi altissimi (0.9-1.0), mentre sopra i 280g il punteggio crolla rapidamente (sotto 0.6), penalizzando le scarpe pesanti più di quanto farebbe una semplice scala lineare.
+
+    ### 2. L'Effetto "Teeter-Totter" (Drive Index) 🚀
+    Avere una piastra in carbonio non basta. Lo studio evidenzia che la performance è una sinergia (effetto leva) tra:
+    * **Piastra Rigida:** Agisce come leva.
+    * **Geometria Rocker:** Agisce come fulcro.
+    * **Rigidità Torsionale:** Trasmette la forza senza dispersioni.
+    * **Come funziona qui:** Il *Drive Index* moltiplica questi fattori. Se una scarpa ha la piastra ma è piatta (niente rocker), il punteggio Drive sarà basso.
+
+    ### 3. Rigidità Longitudinale: La curva a "U" 🔧
+    La meta-analisi suggerisce che la rigidità non segue una regola "più è meglio".
+    * **Come funziona qui:** Per le scarpe da gara (*Race*), premiamo la rigidità alta (necessaria per la piastra). Per le scarpe da allenamento (*Daily*), usiamo una curva a campana: troppa rigidità a ritmi lenti è penalizzante e scomoda.
+
+    ### 4. Schiuma vs Piastra (Foam is King) ☁️
+    Contrariamente al marketing, gli studi indicano che la **schiuma (PEBA)** contribuisce al risparmio energetico più della piastra stessa.
+    * **Come funziona qui:** Nel calcolo finale, l'*Energy Return* (dato dalla schiuma) ha un peso preponderante rispetto alla sola presenza della piastra.
+    """)
 
 file_name = "database_completo_AFT_20251124_clean.csv"
 
@@ -680,7 +715,6 @@ if selected_for_detail:
                 st.caption(f"Flexibility: {val_flex:.2f}")
                 st.progress(val_flex)
                 
-                # DRIVE DISPLAY
                 val_drive = float(row['DriveIndex'])
                 st.markdown(f"**🚀 Drive (Spinta): {val_drive:.2f}**")
                 st.progress(val_drive)
@@ -699,9 +733,8 @@ if selected_for_detail:
 # ============================================
 
 st.markdown("---")
-st.header("🔎 Modelli Simili (Biomeccanica + Drive)")
+st.header("🔎 Modelli Simili (Biomeccanica)")
 
-# Aggiungiamo DriveIndex alla lista delle metriche per similitudine e radar
 cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
 df_simili = trova_scarpe_simili(df_filt, selected_for_detail, cols_simil, n_simili=3)
 
