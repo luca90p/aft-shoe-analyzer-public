@@ -583,7 +583,7 @@ with col_confronto_radar:
         df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
         df_comp = df_comp.reset_index(drop=True) 
 
-        # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot e la tabella
+        # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO
         df_comp = df_comp.rename(columns={
             "ShockIndex_calc": "ShockIndex",
             "EnergyIndex_calc": "EnergyIndex"
@@ -594,21 +594,19 @@ with col_confronto_radar:
         # Colonne numeriche da pulire per la tabella
         cols_to_clean = ["MPI_B", "ValueIndex"] + metrics_plot
         
-        # --- FIX DEFINITIVO: Pulizia Esplicita della Series (per risolvere TypeError) ---
+        # --- FIX: CICLO DI PULIZIA 1D (CON TRY/EXCEPT CORRETTO) ---
         try:
             for col in cols_to_clean:
                 if col in df_comp.columns:
-                    # 1. Estrai la Series in modo non ambiguo
-                    series_to_convert = df_comp[col]
-                    
-                    # 2. Converte la Series e assegna il risultato indietro
+                    # Converti la Series 1D alla volta, risolvendo l'errore "arg must be 1-d"
                     df_comp.loc[:, col] = pd.to_numeric(
-                        series_to_convert, 
+                        df_comp[col], 
                         errors='coerce'
-                    ).astype(float)
-            except Exception as e:
-                st.error(f"Errore di pulizia dati: Il contesto del DataFrame è instabile. Dettaglio: {e}")
-                st.stop()
+                    ).astype(float).round(3)
+        except Exception as e:
+            # Se la pulizia fallisce (es. dati corrotti nel CSV), gestiamo l'errore
+            st.error(f"Errore di pulizia dati: Il contesto del DataFrame è instabile. Dettaglio: {e}")
+            st.stop()
         # ---------------------------------------------------------------------------
 
 
@@ -627,11 +625,13 @@ with col_confronto_radar:
                 st.dataframe(df_display, use_container_width=True)
             
             st.markdown("#### Profilo Radar")
+            # Qui il Radar Plot è sicuro
             fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
             st.pyplot(fig)
         else:
             st.info("Dati per il Radar Chart incompleti o non numerici.")
     else:
         st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+
 
 
