@@ -13,8 +13,8 @@ from sklearn.metrics import silhouette_samples
 
 def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calcola il 'Drive Index' (0-1) basato sull'interazione meccanica (Teeter-Totter effect).
-    Riferimento: Effects of the curved carbon fibre plate and PEBA foam.
+    Calcola il 'Drive Index' (0-1) basato sull'interazione meccanica.
+    SCALA RIGIDITÀ: 5N (Soft) - 35N+ (Stiff).
     """
     
     # 1. Score Piastra (Plate)
@@ -31,11 +31,11 @@ def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
     def score_rocker(val):
         if pd.isna(val) or str(val) in ['nan', '#N/D']: return 0.0
         try:
-            # Normalizzazione su altezza massima teorica di 10mm
             clean_val = str(val).replace(',', '.')
             parts = clean_val.split('x')
             if len(parts) >= 1:
                 h = float(parts[0])
+                # Normalizziamo su 10mm di altezza
                 return min(h / 10.0, 1.0)
             return 0.0
         except:
@@ -46,22 +46,21 @@ def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
     # 3. Score Schiuma (Energy Return)
     S_Foam = df['EnergyIndex'] 
 
-    # 4. Score Rigidità Longitudinale (Leverage support)
-    flex_val = pd.to_numeric(df['rigidezza_flex'], errors='coerce').fillna(100)
-    S_Stiffness = (flex_val - 50) / 250.0
+    # 4. Score Rigidità Longitudinale (Normalizzato su 5N - 35N)
+    # 35N è considerata una rigidità molto alta (necessaria per la leva)
+    flex_val = pd.to_numeric(df['rigidezza_flex'], errors='coerce').fillna(15)
+    S_Stiffness = (flex_val - 5) / 30.0 # (Val - Min) / (Max - Min) -> (x - 5) / 30
     S_Stiffness = S_Stiffness.clip(0, 1)
 
-    # FORMULA DRIVE: Sinergia Meccanica (Plate * Rocker * Stiffness) + Contributo Schiuma
+    # FORMULA DRIVE
     Mechanical_Drive = S_Plate * S_Rocker * S_Stiffness
-    
-    # Ponderazione: 60% Meccanica, 40% Materiale (Schiuma)
     df['DriveIndex'] = (0.6 * Mechanical_Drive) + (0.4 * S_Foam)
     
     return df
 
 
 def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
-    """ Calcola gli indici biomeccanici normalizzati basati su letteratura. """
+    """ Calcola gli indici biomeccanici normalizzati. """
 
     def safe_minmax(x: pd.Series) -> pd.Series:
         x = x.astype(float)
@@ -81,23 +80,27 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df["ShockIndex"]  = (w_heel * S_heel + w_mid * S_mid) / (w_heel + w_mid)
     df["EnergyIndex"] = (w_heel * ER_h   + w_mid * ER_m)  / (w_heel + w_mid)
 
-    # --- 2. Flex Index (Ottimizzazione non lineare) ---
-    Flex = df["rigidezza_flex"].astype(float).to_numpy()
+    # --- 2. Flex Index (Ricalibrato su Newton: 5-35N) ---
+    # Riferimento: The effects of footwear midsole longitudinal bending stiffness.
+    Flex = pd.to_numeric(df["rigidezza_flex"], errors='coerce').fillna(15)
     FlexIndex = np.zeros(len(df))
     passi = df["passo"].astype(str).str.lower().to_list()
 
     for i, tipo in enumerate(passi):
+        val_N = Flex[i]
         if "race" in tipo:
-            # Curva sigmoide per massimizzare la rigidità nelle scarpe da gara
-            FlexIndex[i] = 1 / (1 + np.exp(-(Flex[i] - 200) / 50)) 
+            # Race: Più rigido è meglio (> 20N). Sigmoide centrata a 18N.
+            # 10N -> 0.05 | 18N -> 0.5 | 25N -> 0.9
+            FlexIndex[i] = 1 / (1 + np.exp(-(val_N - 18) / 2.5)) 
         else:
-            # Curva gaussiana per allenamento (comfort range)
-            FlexIndex[i] = np.exp(-((Flex[i] - 150) ** 2) / (2 * 50 ** 2))
+            # Daily: Comfort ottimale ~12N. Gaussiana.
+            # 12N -> 1.0 | 5N -> basso | 25N -> basso (troppo duro)
+            FlexIndex[i] = np.exp(-((val_N - 12) ** 2) / (2 * 5 ** 2))
             
     df["FlexIndex"] = FlexIndex
 
     # --- 3. Weight Index (Costo Metabolico) ---
-    # Regola: +100g = +1% costo energetico.
+    # Riferimento: Metabolic cost of running, body weight influence.
     W = df["peso"].astype(float).to_numpy()
     W_ref = 180.0 
     k = 0.005 
@@ -108,6 +111,7 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df["WeightIndex"] = WeightIndex
 
     # --- 4. StackFactor ---
+    # Riferimento: The effects of running shoe stack.
     stack = df["altezza_tallone"].astype(float).to_numpy()
     StabilityMod = np.ones(len(df))
     mask_hi = stack > 40
@@ -271,6 +275,7 @@ def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Analisi Compar
     categories = [metrics_readable.get(m, m) for m in metrics]
     comparison_colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd'] 
     
+    # Loop per modelli di confronto (background)
     for i in range(1, len(df_shoes)):
         row = df_shoes.iloc[i]
         values = [float(row[m]) for m in metrics]
@@ -290,6 +295,7 @@ def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Analisi Compar
             hoveron='points+fills'
         ))
 
+    # Modello selezionato (foreground)
     if not df_shoes.empty:
         row = df_shoes.iloc[0]
         values = [float(row[m]) for m in metrics]
@@ -335,6 +341,7 @@ def trova_scarpe_simili(df, target_label, metrics_cols, n_simili=3):
         
         df_calc['distanza_similitudine'] = distances
         
+        # Filtra se stesso e ordina per distanza
         simili = df_calc[df_calc['label'] != target_label].sort_values('distanza_similitudine').head(n_simili)
         return simili
     except Exception as e:
@@ -361,16 +368,19 @@ with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
     st.markdown("""
     L'algoritmo MPI-B integra evidenze scientifiche per valutare l'efficienza della calzatura.
     
-    **1. Costo Metabolico del Peso (Weight Efficiency)**
+    **1. Rigidità Longitudinale (Flex Index)**
+    Il database misura la **Forza (N)** necessaria per flettere la suola di **30°**.
+    * **Scala:** 5-10N (Molto Flessibile) <---> 20-35N (Molto Rigida/Plate).
+    * **Logica:** * *Gara (Race):* Richiede valori alti (> 18N) per sfruttare l'effetto leva.
+        * *Allenamento (Daily):* Richiede valori moderati (~12N) per comfort.
+    * *Fonte:*
+
+    **2. Costo Metabolico del Peso (Weight Efficiency)**
     *Ogni 100g di massa aggiuntiva aumentano il costo energetico dell'1%.*
     * *Fonte:*
     
-    **2. Indice di Spinta Meccanica (Drive Index)**
-    La performance deriva dall'interazione ("Teeter-Totter effect") tra piastra e rocker.
-    * *Fonte:*
-    
-    **3. Ottimizzazione Rigidità Longitudinale (Flex Index)**
-    La relazione tra rigidità ed economia di corsa non è lineare.
+    **3. Indice di Spinta Meccanica (Drive Index)**
+    La performance deriva dall'interazione ("Teeter-Totter effect") tra piastra, geometria del rocker e rigidità.
     * *Fonte:*
     """)
 
@@ -378,31 +388,21 @@ with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
 with st.expander("📐 Formule Matematiche del Modello AFT"):
     st.markdown(r"""
     Il calcolo del punteggio totale MPI-B si basa su una somma pesata di 5 indici normalizzati $[0, 1]$.
-    
-    ### 1. Normalizzazione dei Dati Grezzi
-    Per gli indici lineari (Shock, Energy), utilizziamo il Min-Max scaling sui dati di laboratorio:
-    $$ I_{norm} = \frac{x - x_{min}}{x_{max} - x_{min}} $$
 
-    ### 2. Weight Efficiency Index ($I_{Weight}$)
-    Basato sul decadimento esponenziale del vantaggio metabolico.
-    $$ I_{Weight} = e^{-k \cdot (Peso_{g} - 180)} $$
-    Dove $k \approx 0.005$ per penalizzare fortemente i pesi > 250g.
+    ### 1. Flex Index ($I_{Flex}$) - Calibrato su Newton (N)
+    * **Race:** Sigmoide centrata su 18N.
+      $$ I_{Flex, Race} = \frac{1}{1 + e^{-(Flex - 18)/2.5}} $$
+    * **Daily:** Gaussiana centrata su 12N.
+      $$ I_{Flex, Daily} = e^{-\frac{(Flex - 12)^2}{2 \cdot 5^2}} $$
 
-    ### 3. Flex Index ($I_{Flex}$)
-    Modellazione non lineare dipendente dal passo (Race vs Daily).
-    * **Race (Sigmoide):** Premia la rigidità elevata.
-      $$ I_{Flex, Race} = \frac{1}{1 + e^{-(Flex - 200)/50}} $$
-    * **Daily (Gaussiana):** Premia un valore intermedio ottimale (~150 N/mm).
-      $$ I_{Flex, Daily} = e^{-\frac{(Flex - 150)^2}{2 \cdot 50^2}} $$
-
-    ### 4. Drive Index ($I_{Drive}$)
-    Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
+    ### 2. Drive Index ($I_{Drive}$)
+    Sinergia meccanica (Plate + Rocker + Stiffness) e materiale (Foam).
+    * $S_{Stiffness} = (Flex_{N} - 5) / 30$
     $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiffness}) + 0.4 \cdot S_{Foam} $$
-    Dove $S_{Plate}=1.0$ per Carbonio, $S_{Rocker}$ è l'altezza normalizzata della punta.
 
-    ### 5. MPI-B (Mescola Performance Index)
-    Il punteggio finale è la somma pesata dai cursori utente ($w_i$):
-    $$ MPI = w_{Shock} \cdot I_{Shock} + w_{Energy} \cdot I_{Energy} + w_{Flex} \cdot I_{Flex} + w_{Weight} \cdot I_{Weight} $$
+    ### 3. Weight Efficiency ($I_{Weight}$)
+    Decadimento esponenziale dal riferimento 180g.
+    $$ I_{Weight} = e^{-0.005 \cdot (Peso_{g} - 180)} $$
     """)
 
 file_name = "database_completo_AFT_20251124_clean.csv"
@@ -671,9 +671,8 @@ if selected_for_detail:
             
             if pd.notna(row.get('ValueIndex')):
                 val_idx = float(row['ValueIndex'])
-                stars = render_stars(val_idx)
                 st.write("**Value Index:**")
-                st.markdown(f"### {val_idx:.3f} {stars}")
+                st.markdown(f"### {val_idx:.3f}")
 
         with col_dx:
             st.write("#### Profilo Biomeccanico")
@@ -737,4 +736,4 @@ if not df_simili.empty:
     st.plotly_chart(fig_radar, use_container_width=True)
             
 else:
-    st.write("Nessun modello simile trovato nei filtri correnti.")
+    st.write("Nessun modello comparabile identificato con i filtri attuali.")
