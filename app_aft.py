@@ -243,6 +243,27 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
 
 
 # =========================
+#   HELPER DI VISUALIZZAZIONE
+# =========================
+def render_stars(value):
+    """
+    Converte un valore 0-1 in una stringa di 5 stelle.
+    Es: 0.8 -> ★★★★☆
+    """
+    if pd.isna(value):
+        return ""
+    # Scala da 0-1 a 0-5 e arrotonda
+    score = int(round(value * 5))
+    # Clampa tra 0 e 5 per sicurezza
+    score = max(0, min(5, score))
+    
+    full_star = "★"
+    empty_star = "☆"
+    
+    return (full_star * score) + (empty_star * (5 - score))
+
+
+# =========================
 #   APP STREAMLIT
 # =========================
 
@@ -420,24 +441,17 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
             st.session_state['selected_point_key'] = default_label_on_load
         
         # FIX: Se il modello precedentemente selezionato non è nel nuovo filtro, resettiamo il default.
-        if st.session_state['selected_point_key'] not in df_val_sorted['label'].tolist():
-             st.session_state['selected_point_key'] = default_label_on_load
+        current_model_list = df_val_sorted['label'].tolist()
+        
+        if st.session_state['selected_point_key'] not in current_model_list:
+             st.session_state['selected_point_key'] = current_model_list[0]
         
         selected_label = st.session_state['selected_point_key']
         
         # 2B. SELEZIONE UNIFICATA (Selectbox e Grafico)
         st.write("### 📊 Posizionamento MPI vs Prezzo")
         
-        # Trova l'indice del modello corrente per preimpostare correttamente la selectbox
-        current_model_list = df_val_sorted['label'].tolist()
-        
-        if selected_label in current_model_list:
-            selected_index = current_model_list.index(selected_label)
-        else:
-            selected_index = 0
-            # Aggiorniamo lo stato di sessione con il nuovo default per coerenza
-            st.session_state['selected_point_key'] = current_model_list[0] 
-            selected_label = current_model_list[0]
+        selected_index = current_model_list.index(selected_label)
 
         selected_label_input = st.selectbox(
             "🔎 **Trova ed evidenzia un modello nel grafico e nella scheda dettagli:**",
@@ -471,7 +485,7 @@ else:
 
 
 # ============================================
-# 3. SCHEDA DETTAGLIO (Reintrodotta con Valori Visibili)
+# 3. SCHEDA DETTAGLIO (con Stelle)
 # ============================================
 
 st.markdown("---")
@@ -481,7 +495,6 @@ selected_for_detail = st.session_state['selected_point_key']
 
 if selected_for_detail:
     # Estraiamo i dati per la card
-    # Usiamo il dataset filtrato per avere i dati corretti, assicurandoci che esista
     try:
         row = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
     except IndexError:
@@ -500,8 +513,11 @@ if selected_for_detail:
             
             st.metric("MPI-B Score", f"{row['MPI_B']:.3f}")
             st.metric("Prezzo", f"{row[PRICE_COL]:.0f} €" if PRICE_COL else "N/A")
+            
             if pd.notna(row.get('ValueIndex')):
-                st.write(f"**Value Index:** {row['ValueIndex']:.3f}")
+                val_idx = float(row['ValueIndex'])
+                stars = render_stars(val_idx)
+                st.markdown(f"**Value Index:** {val_idx:.3f} &nbsp; {stars}")
 
         with col_dx:
             st.write("#### Caratteristiche Biomeccaniche")
@@ -510,8 +526,7 @@ if selected_for_detail:
             
             st.markdown("---")
             
-            # Visualizzazione con VALORI ESPLICITI nel testo (perché st.progress non ha hover)
-            
+            # Visualizzazione con VALORI ESPLICITI nel testo
             val_shock = float(row['ShockIndex_calc'])
             st.write(f"**Shock Absorption:** {val_shock:.3f} / 1.0")
             st.progress(val_shock)
