@@ -277,14 +277,8 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
         legend_title_text='Punti Dati'
     )
     
-    fig.add_annotation(
-        x=df_val[price_col].mean(), 
-        y=1.05,
-        text="Clicca su un punto per selezionarlo per il Dettaglio/Confronto!",
-        showarrow=False,
-        font=dict(size=12, color="blue")
-    )
-
+    # Rimosso l'annotazione di click per semplificare l'UX e farla dipendere dalla selectbox
+    
     return fig
 
 
@@ -481,47 +475,28 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
             selected_index = model_list.index(selected_label)
         else:
             selected_index = 0
-            # Aggiorniamo lo stato di sessione con il nuovo default per coerenza
             st.session_state['selected_point_key'] = model_list[0] 
+            selected_label = model_list[0] # Aggiorna la variabile locale per il plot
 
         selected_label_input = st.selectbox(
-            "Seleziona un modello per il Dettaglio (o clicca sul grafico per cambiarlo):",
+            "Seleziona un modello per il Dettaglio e l'Evidenziazione:",
             model_list,
-            index=selected_index # Usa l'indice trovato
+            index=selected_index, # Usa l'indice trovato
+            key='main_selectbox'
         )
         
         # Aggiorna lo stato se l'utente cambia la selectbox
         if selected_label_input != st.session_state['selected_point_key']:
              st.session_state['selected_point_key'] = selected_label_input
-             st.rerun() # Ricarica per aggiornare Step 3
+             # Non serve st.rerun se non catturiamo il click dal grafico, ma aggiorniamo subito
+             # Se usiamo la key='main_selectbox', Streamlit aggiorna automaticamente la session_state
 
         selected_points_labels = [st.session_state['selected_point_key']]
         
         fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
         
-        # Utilizzo dell'API standard di Streamlit per catturare la selezione al click
-        plotly_event = st.plotly_chart(
-            fig_scatter, 
-            use_container_width=True, 
-            selection_mode="single",
-            key='mpi_scatter_chart' 
-        )
-
-        # CATTURA DELL'EVENTO DI SELEZIONE TRAMITE SESSION_STATE
-        
-        selection_data_state = st.session_state.get('mpi_scatter_chart')
-
-        # Analizza se sono stati selezionati punti
-        if selection_data_state and selection_data_state.get('selection'):
-            selection_points = selection_data_state['selection'].get('points')
-            
-            if selection_points and selection_points[0].get('customdata'):
-                new_selection = selection_points[0]['customdata'][0]
-                
-                # Aggiorno lo stato se la selezione è cambiata
-                if new_selection != st.session_state['selected_point_key']:
-                    st.session_state['selected_point_key'] = new_selection
-                    st.rerun() # Ricarica per aggiornare Step 3
+        # Mostriamo il grafico Plotly (senza cattura eventi mouse/click)
+        st.plotly_chart(fig_scatter, use_container_width=True)
 
         # 2C. CLASSIFICA VALUE INDEX
         st.write("### 🏆 Classifica Qualità/Prezzo (MPI-B / Costo)")
@@ -550,34 +525,35 @@ st.info(f"Stai analizzando il modello: **{selected_for_detail if selected_for_de
 
 
 if selected_for_detail:
-    # 1. Trova i dati del modello di dettaglio
     scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
     
-    st.subheader(f"🔬 Dettaglio: {selected_for_detail}")
+    # Rimosso il nome del modello da subheader per evitare la ridondanza.
+    st.subheader(f"🔬 Dettaglio Biomeccanico")
 
     # --- INPUT CONFRONTO (Multi-select) ---
-    # Rimuoviamo la gestione del default dalla session_state e la forziamo a contenere il modello di dettaglio
-    # La multiselect mostrerà i valori selezionati dall'utente.
+    # Inizializziamo il default del confronto per includere sempre il modello di dettaglio
+    default_comparison = [selected_for_detail]
     
-    # Seleziona il modello di dettaglio come default iniziale per il confronto
-    if 'comparison_list' not in st.session_state:
-        st.session_state['comparison_list'] = [selected_for_detail]
+    # Usiamo una lista di sessione separata per memorizzare le selezioni del radar, 
+    # garantendo che il modello di dettaglio sia sempre il primo elemento se non vuoto.
+    if 'radar_comparison' not in st.session_state:
+        st.session_state['radar_comparison'] = default_comparison
     
-    # Se selected_for_detail cambia (da Step 2), resettiamo la lista di confronto per includerlo
-    if selected_for_detail not in st.session_state['comparison_list']:
-        st.session_state['comparison_list'] = [selected_for_detail]
+    # Se il modello di dettaglio è cambiato (da Step 2), resettiamo la lista di confronto per includerlo.
+    if selected_for_detail not in st.session_state['radar_comparison']:
+        st.session_state['radar_comparison'] = default_comparison
 
 
     selezione_confronto = st.multiselect(
-        "Seleziona altri modelli per il Radar Chart",
+        "Seleziona modelli da comparare nel Radar Chart",
         df_filt["label"].tolist(),
         max_selections=5,
-        default=st.session_state['comparison_list'],
+        default=st.session_state['radar_comparison'],
         key='radar_multiselect'
     )
-
-    # Aggiorna la variabile di sessione con la nuova selezione dell'utente
-    st.session_state['comparison_list'] = selezione_confronto
+    
+    # Aggiorna lo stato di sessione con la selezione corrente
+    st.session_state['radar_comparison'] = selezione_confronto
 
 
     col_dettaglio, col_confronto_radar = st.columns([1, 2])
@@ -607,12 +583,9 @@ if selected_for_detail:
     with col_confronto_radar:
         st.subheader("Analisi Biomeccanica (Indici 0-1)")
         
-        # ⚠️ FIX LOGICO: Usiamo direttamente lo stato aggiornato
-        current_comparison_list = st.session_state['comparison_list']
-        
-        if current_comparison_list:
-            
-            df_comp = df_filt[df_filt["label"].isin(current_comparison_list)].copy()
+        # ⚠️ Verifichiamo la lista di confronto
+        if selezione_confronto:
+            df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
             df_comp = df_comp.reset_index(drop=True) 
 
             # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
@@ -623,11 +596,10 @@ if selected_for_detail:
             
             metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
             
-            # Verifichiamo che tutte le colonne siano presenti e che il DataFrame non sia vuoto
             if all(m in df_comp.columns for m in metrics_plot) and not df_comp.empty:
                 
                 # Aggiungi una tabella di confronto (se ci sono più di 1 elemento)
-                if len(current_comparison_list) > 1:
+                if len(selezione_confronto) > 1:
                     st.markdown("#### Tabella Comparativa")
                     cols_table = ["label", "MPI_B", "ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
                     st.dataframe(df_comp[cols_table], use_container_width=True)
