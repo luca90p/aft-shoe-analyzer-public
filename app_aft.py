@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt # Mantenuto per il Radar Plot
+import matplotlib.pyplot as plt
 import plotly.express as px
-import plotly.graph_objects as go # Non strettamente necessario qui, ma utile per future personalizzazioni
+import plotly.graph_objects as go
 
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
@@ -196,16 +196,16 @@ def esegui_clustering(df: pd.DataFrame):
 def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     """ 
     Grafico Radar Matplotlib.
-    FIX: Forza la conversione float per prevenire errori di tipo (ValueError: setting an array element with a sequence).
+    NOTA: Il casting a float viene eseguito qui per garantire la compatibilità con Matplotlib.
     """
     import numpy as np
     
-    # --- FIX: Forza la conversione a float per garantire che ogni cella sia un valore scalare ---
+    # --- FIX: Forza la conversione a float in-place per il plotting ---
     for m in metrics:
         if m in df_comp.columns:
-            # Usiamo .loc per evitare SettingWithCopyWarning
-            df_comp.loc[:, m] = df_comp[m].astype(float) 
-    # -----------------------------------------------------------------------------------------
+            # Assicuriamo che la colonna sia float, risolvendo problemi di sequenze in celle
+            df_comp[m] = df_comp[m].astype(float) 
+    # ------------------------------------------------------------------
     
     n_metrics = len(metrics)
     angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False)
@@ -216,7 +216,6 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     ax.set_theta_direction(-1)
 
     for _, row in df_comp.iterrows():
-        # Qui Matplotlib riceve solo float
         values = [row[m] for m in metrics]
         values = values + [values[0]]
         label = row[label_col]
@@ -251,7 +250,7 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
         x=price_col,
         y="MPI_B",
         color='Colore_Evidenziazione',
-        hover_name='hover_text', # Usiamo il testo personalizzato nell'hover
+        hover_name='hover_text', 
         color_discrete_map={
             'Selezionato': 'red',
             'Mercato': 'gray'
@@ -414,7 +413,6 @@ S_mid  = safe_minmax_series(df_filt["shock_abs_mesopiede"])
 ER_h   = safe_minmax_series(df_filt["energy_ret_tallone"])
 ER_m   = safe_minmax_series(df_filt["energy_ret_mesopiede"])
 
-# Nota: Usiamo .loc per assegnare nuovi indici calcolati
 df_filt.loc[:, "ShockIndex_calc"] = (w_heel * S_heel + w_mid * S_mid)
 df_filt.loc[:, "EnergyIndex_calc"] = (w_heel * ER_h   + w_mid * ER_m)
 df_filt["ShockIndex_calc"] = safe_minmax_series(df_filt["ShockIndex_calc"])
@@ -565,29 +563,29 @@ if selected_for_detail:
         st.write("**Cluster:**")
         st.write(f"Cl. {int(scarpa['Cluster'])}: {scarpa['ClusterDescrizione']}")
 
-   # --- 3B. RADAR CHART ---
-with col_confronto_radar:
-    st.subheader("Analisi Biomeccanica (Indici 0-1)")
-    
-    if selezione_confronto:
-        # 1. Crea la copia e RESETTA L'INDICE per pulire l'asse delle righe
-        df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
-        df_comp = df_comp.reset_index(drop=True) 
+    # --- 3B. RADAR CHART ---
+    with col_confronto_radar:
+        st.subheader("Analisi Biomeccanica (Indici 0-1)")
+        
+        if selezione_confronto:
+            df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
+            # FIX: Puliamo l'indice per evitare ambiguità nell'assegnazione
+            df_comp = df_comp.reset_index(drop=True) 
 
-        # 2. Rinomina le colonne calcolate nel DataFrame TEMPORANEO
-        df_comp = df_comp.rename(columns={
-            "ShockIndex_calc": "ShockIndex",
-            "EnergyIndex_calc": "EnergyIndex"
-        })
-        
-        metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-        
-        if all(m in df_comp.columns for m in metrics_plot):
+            # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
+            df_comp = df_comp.rename(columns={
+                "ShockIndex_calc": "ShockIndex",
+                "EnergyIndex_calc": "EnergyIndex"
+            })
             
-            # La funzione plot_radar_indices ora eseguirà il casting su un DataFrame con indice pulito.
-            fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
-            st.pyplot(fig)
+            metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+            
+            if all(m in df_comp.columns for m in metrics_plot):
+                
+                # La funzione plot_radar_indices ora gestisce il cast a float internamente
+                fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
+                st.pyplot(fig)
+            else:
+                st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
-            st.info("Dati per il Radar Chart incompleti o non numerici.")
-    else:
-        st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+            st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
