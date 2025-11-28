@@ -588,7 +588,7 @@ with col_confronto_radar:
         df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
         df_comp = df_comp.reset_index(drop=True) 
 
-        # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot e la tabella
+        # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO
         df_comp = df_comp.rename(columns={
             "ShockIndex_calc": "ShockIndex",
             "EnergyIndex_calc": "EnergyIndex"
@@ -596,33 +596,38 @@ with col_confronto_radar:
         
         metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
         
+        # Colonne numeriche da pulire per la tabella
+        cols_to_clean = ["MPI_B", "ValueIndex"] + metrics_plot
+        
+        # --- FIX DEFINITIVO: Pulizia Esplicita del Tipo su tutte le Colonne Target ---
+        try:
+            # Applichiamo la conversione to_numeric (errors='coerce') su un subset di colonne.
+            # Questo garantisce che ogni colonna riceva una Series pulita di float.
+            for col in cols_to_clean:
+                if col in df_comp.columns:
+                    df_comp[col] = pd.to_numeric(df_comp[col], errors='coerce').astype(float).round(3)
+        except Exception as e:
+            # Se la pulizia fallisce (es. se i dati originali sono irrecuperabili), 
+            # mostriamo l'errore senza fermare l'app in modo brusco.
+            st.error(f"Errore di pulizia dei dati: Controlla la consistenza del CSV. Dettaglio: {e}")
+            st.stop()
+        # ---------------------------------------------------------------------------
+
         if all(m in df_comp.columns for m in metrics_plot) and not df_comp.empty:
             
-            # --- FIX: PULIZIA ESPLICITA DEI TIPI PRIMA DEL DATAFRAME ---
-            # Questo risolve l'errore PyArrow (Pyarrow/pandas_compat.py)
-            try:
-                for col in ["MPI_B", "ValueIndex"] + metrics_plot:
-                    if col in df_comp.columns:
-                        # Forziamo il tipo a float, gestendo eventuali NaN/stringhe
-                        df_comp.loc[:, col] = pd.to_numeric(df_comp[col], errors='coerce').astype(float).round(3)
-            except Exception as e:
-                st.error(f"Errore critico durante la pulizia dei dati per la tabella: {e}")
-                st.stop()
-            # -----------------------------------------------------------
-
             # Aggiungi una tabella di confronto (se ci sono più di 1 elemento)
             if len(selezione_confronto) > 1:
                 st.markdown("#### Tabella Comparativa")
                 cols_table = ["label", "MPI_B", "ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-                # Assicuriamo che tutte le colonne esistano prima di mostrarle
                 cols_table = [c for c in cols_table if c in df_comp.columns]
                 
+                # df_comp[cols_table] ora è garantito essere float/object (label)
                 st.dataframe(df_comp[cols_table], use_container_width=True)
             
             st.markdown("#### Profilo Radar")
             fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
             st.pyplot(fig)
         else:
-            st.info("Dati per il Radar Chart incompleti o non numerici (controlla i filtri).")
+            st.info("Dati per il Radar Chart incompleti o non numerici.")
     else:
         st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
