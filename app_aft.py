@@ -191,7 +191,6 @@ def esegui_clustering(df: pd.DataFrame):
 
     return df, cluster_summary
 
-
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     """ Scatter plot MPI-B vs Prezzo usando Plotly (solo hover). """
     
@@ -241,12 +240,20 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     
     return fig
 
-def plot_radar_comparison_plotly(df_shoes, metrics, title="Confronto Biomeccanico (Radar)"):
-    """ Crea un Radar Chart interattivo con Plotly per confrontare le scarpe. """
+# =============================================
+#   NUOVA FUNZIONE RADAR CHART CON STILI
+# =============================================
+def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Confronto Biomeccanico (Radar)"):
+    """ 
+    Crea un Radar Chart interattivo con Plotly.
+    MIGLIORAMENTI:
+    1. Z-Order: Disegna la scarpa principale (riga 0) per ultima (sopra).
+    2. Stili distinti: Linea spessa/rossa per la principale, sottile/pastello per le altre.
+    3. Trasparenze: Fill molto leggero per le secondarie per evitare confusione.
+    """
     
     fig = go.Figure()
     
-    # Mapping per nomi leggibili nel grafico
     metrics_readable = {
         "ShockIndex_calc": "Shock",
         "EnergyIndex_calc": "Energy",
@@ -256,9 +263,35 @@ def plot_radar_comparison_plotly(df_shoes, metrics, title="Confronto Biomeccanic
     
     categories = [metrics_readable.get(m, m) for m in metrics]
     
-    for i, row in df_shoes.iterrows():
+    # Colori per le scarpe di confronto (Simili)
+    comparison_colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd'] # Blu, Verde, Arancio, Viola
+    
+    # 1. DISEGNA PRIMA LE SCARPE DI CONFRONTO (Indici 1, 2, 3...)
+    # Così vanno "sotto" nel grafico
+    for i in range(1, len(df_shoes)):
+        row = df_shoes.iloc[i]
         values = [float(row[m]) for m in metrics]
-        # Chiudi il poligono ripetendo il primo valore
+        values += [values[0]] # Chiudi poligono
+        categories_closed = categories + [categories[0]]
+        
+        color = comparison_colors[(i-1) % len(comparison_colors)]
+        
+        fig.add_trace(go.Scatterpolar(
+            r=values,
+            theta=categories_closed,
+            fill='toself',
+            name=f"{row['label']} (Simile)",
+            line=dict(color=color, width=1, dash='dot'), # Linea sottile e tratteggiata
+            fillcolor=color,
+            opacity=0.3, # Molto trasparente per non coprire
+            hoveron='points+fills'
+        ))
+
+    # 2. DISEGNA PER ULTIMA LA SCARPA SELEZIONATA (Indice 0)
+    # Così va "sopra" tutto
+    if not df_shoes.empty:
+        row = df_shoes.iloc[0]
+        values = [float(row[m]) for m in metrics]
         values += [values[0]]
         categories_closed = categories + [categories[0]]
         
@@ -266,26 +299,31 @@ def plot_radar_comparison_plotly(df_shoes, metrics, title="Confronto Biomeccanic
             r=values,
             theta=categories_closed,
             fill='toself',
-            name=row['label']
+            name=f"★ {row['label']} (Selezionata)", # Stella nel nome
+            line=dict(color='red', width=4), # Linea rossa e spessa
+            fillcolor='rgba(255, 0, 0, 0.2)', # Rosso semi-trasparente
+            opacity=0.9 # Opacità alta per la linea
         ))
     
     fig.update_layout(
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                range=[0, 1]
-            )
+                range=[0, 1],
+                tickfont=dict(size=10),
+                gridcolor='lightgrey'
+            ),
+            bgcolor='white'
         ),
-        title=title,
-        showlegend=True
+        title=dict(text=title, x=0.5),
+        showlegend=True,
+        legend=dict(orientation="h", y=-0.1) # Legenda orizzontale sotto
     )
     
     return fig
 
 def trova_scarpe_simili(df, target_label, metrics_cols, n_simili=3):
-    """
-    Trova le n scarpe più simili basandosi sulla distanza euclidea.
-    """
+    """ Trova le n scarpe più simili basandosi sulla distanza euclidea. """
     try:
         target_vector = df.loc[df['label'] == target_label, metrics_cols].astype(float).values[0]
         df_calc = df.copy()
@@ -295,7 +333,6 @@ def trova_scarpe_simili(df, target_label, metrics_cols, n_simili=3):
         
         df_calc['distanza_similitudine'] = distances
         
-        # Escludi se stesso
         simili = df_calc[df_calc['label'] != target_label].sort_values('distanza_similitudine').head(n_simili)
         
         return simili
@@ -473,7 +510,6 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         if 'selected_point_key' not in st.session_state:
             st.session_state['selected_point_key'] = default_label_on_load
         
-        # Verifica consistenza
         current_model_list = df_val_sorted['label'].tolist()
         if st.session_state['selected_point_key'] not in current_model_list:
              st.session_state['selected_point_key'] = current_model_list[0]
@@ -485,7 +521,6 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
 
         with col_plot:
             st.write("### 📊 Grafico Interattivo")
-            # Selectbox principale
             selected_label_input = st.selectbox(
                 "🔎 Trova ed evidenzia modello:",
                 current_model_list,
@@ -576,11 +611,11 @@ cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
 df_simili = trova_scarpe_simili(df_filt, selected_for_detail, cols_simil, n_simili=3)
 
 if not df_simili.empty:
-    # 1. Mostra le card dei modelli simili
     cols = st.columns(3)
     for i, (idx, row_sim) in enumerate(df_simili.iterrows()):
         with cols[i]:
-            label_sim = row_sim['label'] # Include marca modello versione
+            # Nome modello con versione
+            label_sim = row_sim['label']
             st.markdown(f"**{label_sim}**")
             
             diff_prezzo = row_sim[PRICE_COL] - row[PRICE_COL]
@@ -589,15 +624,16 @@ if not df_simili.empty:
             st.caption(f"MPI: {row_sim['MPI_B']:.3f}")
     
     st.markdown("#### Confronto Radar")
-    # 2. Prepara i dati per il Radar Plot (Originale + Simili)
-    # Creiamo un DF con la scarpa selezionata + le simili
+    
+    # Prepara i dati per il Radar Plot (Originale + Simili)
+    # La scarpa selezionata è sempre la prima (iloc[0]) nel df_radar
     df_radar = pd.concat([
         df_filt[df_filt['label'] == selected_for_detail],
         df_simili
     ], ignore_index=True)
     
-    # Plotly Radar Chart
-    fig_radar = plot_radar_comparison_plotly(df_radar, cols_simil)
+    # Plotly Radar Chart STYLIZED
+    fig_radar = plot_radar_comparison_plotly_styled(df_radar, cols_simil)
     st.plotly_chart(fig_radar, use_container_width=True)
             
 else:
