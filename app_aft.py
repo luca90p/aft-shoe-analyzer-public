@@ -575,7 +575,7 @@ if selected_for_detail:
         st.write("**Cluster:**")
         st.write(f"Cl. {int(scarpa['Cluster'])}: {scarpa['ClusterDescrizione']}")
 
-    # --- 3B. RADAR CHART ---
+   # --- 3B. RADAR CHART ---
     with col_confronto_radar:
         st.subheader("Analisi Biomeccanica (Indici 0-1)")
         
@@ -583,7 +583,7 @@ if selected_for_detail:
             df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
             df_comp = df_comp.reset_index(drop=True) 
 
-            # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
+            # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot e la tabella
             df_comp = df_comp.rename(columns={
                 "ShockIndex_calc": "ShockIndex",
                 "EnergyIndex_calc": "EnergyIndex"
@@ -591,15 +591,28 @@ if selected_for_detail:
             
             metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
             
+            # 1. Definizione colonne per la tabella (incluso Price e Value)
+            cols_table = ["label", "MPI_B", PRICE_COL, "ValueIndex"] + metrics_plot
+            cols_table = [c for c in cols_table if c in df_comp.columns]
+            
+            # 2. FIX: Pulizia Tipi per Tabella (Cruciale per PyArrow)
+            for col in [c for c in cols_table if c != "label"]:
+                # Converte forzatamente i valori non numerici in NaN e poi assicura il tipo float.
+                df_comp.loc[:, col] = pd.to_numeric(df_comp[col], errors='coerce').astype(float)
+            # -------------------------------------------------------------
+            
+            
             if all(m in df_comp.columns for m in metrics_plot) and not df_comp.empty:
                 
                 # Aggiungi una tabella di confronto (se ci sono più di 1 elemento)
                 if len(selezione_confronto) > 1:
                     st.markdown("#### Tabella Comparativa")
-                    cols_table = ["label", "MPI_B", "ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-                    cols_table = [c for c in cols_table if c in df_comp.columns]
                     
-                    st.dataframe(df_comp[cols_table], use_container_width=True)
+                    # ⚠️ Applichiamo l'arrotondamento solo al momento della visualizzazione
+                    df_display = df_comp[cols_table].copy()
+                    df_display.iloc[:, 1:] = df_display.iloc[:, 1:].round(3) # Arrotonda tutte le colonne numeriche
+
+                    st.dataframe(df_display, use_container_width=True)
                 
                 st.markdown("#### Profilo Radar")
                 fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
@@ -608,3 +621,4 @@ if selected_for_detail:
                 st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
             st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+
