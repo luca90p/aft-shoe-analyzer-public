@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt # Mantenuto per il Radar Plot
+import matplotlib.pyplot as plt
 import plotly.express as px
 
 from sklearn.cluster import KMeans
@@ -195,12 +195,9 @@ def esegui_clustering(df: pd.DataFrame):
 def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     """ 
     Grafico Radar Matplotlib.
-    FIX: Legge e casta i dati a float scalarmente per prevenire l'errore di assegnazione
-         sulle copie (Setting with non-unique columns).
+    FIX: Legge e casta i dati a float scalarmente per prevenire l'errore strutturale.
     """
     import numpy as np
-    
-    # Non eseguiamo assegnazione in-place su df_comp per prevenire l'errore strutturale.
     
     n_metrics = len(metrics)
     angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False)
@@ -212,8 +209,8 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
 
     for _, row in df_comp.iterrows():
         # --- CORREZIONE: Esegui il casting a float scalarmente ---
-        # Questo risolve sia il problema di tipo (ValueError) sia l'errore strutturale (.loc)
         try:
+            # L'uso di float(row[m]) è il metodo più sicuro per estrarre il valore scalare
             values = [float(row[m]) for m in metrics]
         except (ValueError, TypeError) as e:
             # Se ci sono dati non numerici, salta questa riga
@@ -231,6 +228,7 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     ax.grid(True)
     ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
     return fig
+
 
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     """ Scatter plot MPI-B vs Prezzo usando Plotly per l'interattività (hover e click). """
@@ -472,46 +470,25 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         if st.session_state['selected_point_key'] not in df_val_sorted['label'].tolist():
              st.session_state['selected_point_key'] = default_label_on_load
         
-        # --- All'interno dello Step 2 ---
-# ... (codice precedente, inclusa la correzione del filtro nel session_state) ...
-
-selected_label = st.session_state['selected_point_key']
+        selected_label = st.session_state['selected_point_key']
         
-# 2B. SELEZIONE UNIFICATA (Selectbox e Grafico)
-st.write("### 📊 Posizionamento MPI vs Prezzo")
-
-# Trova l'indice del modello corrente per preimpostare correttamente la selectbox
-
-model_list = df_val_sorted['label'].tolist()
-
-# ⚠️ FIX: Cerca l'indice solo se il modello selezionato è presente nella lista corrente, altrimenti usa 0.
-if selected_label in model_list:
-    selected_index = model_list.index(selected_label)
-else:
-    # Se il modello non è più nel filtro, usiamo il primo elemento del nuovo filtro
-    selected_index = 0
-    # Aggiorniamo lo stato di sessione con il nuovo default per coerenza
-    st.session_state['selected_point_key'] = model_list[0] 
-
-
-selected_label_input = st.selectbox(
-    "Seleziona un modello per il Dettaglio (o clicca sul grafico per cambiarlo):",
-    model_list,
-    index=selected_index # Usa l'indice trovato
-)
-
-# Aggiorna lo stato se l'utente cambia la selectbox
-if selected_label_input != st.session_state['selected_point_key']:
-     st.session_state['selected_point_key'] = selected_label_input
-     st.rerun() # Ricarica per aggiornare Step 3
-
-selected_points_labels = [st.session_state['selected_point_key']]
-
-# ... (il resto dello Step 2 continua inalterato)
+        # 2B. SELEZIONE UNIFICATA (Selectbox e Grafico)
+        st.write("### 📊 Posizionamento MPI vs Prezzo")
+        
+        # Trova l'indice del modello corrente per preimpostare correttamente la selectbox
+        # FIX: Usiamo l'approccio condizionale corretto per l'indice
+        model_list = df_val_sorted['label'].tolist()
+        
+        if selected_label in model_list:
+            selected_index = model_list.index(selected_label)
+        else:
+            selected_index = 0
+            # Se siamo qui, selected_label non era valido, ma lo stato è stato resettato sopra,
+            # quindi selected_label dovrebbe essere model_list[0] e l'indice è 0.
 
         selected_label_input = st.selectbox(
             "Seleziona un modello per il Dettaglio (o clicca sul grafico per cambiarlo):",
-            df_val_sorted['label'].tolist(),
+            model_list,
             index=selected_index # Usa l'indice trovato
         )
         
@@ -636,7 +613,3 @@ if selected_for_detail:
                 st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
             st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
-
-
-
-
