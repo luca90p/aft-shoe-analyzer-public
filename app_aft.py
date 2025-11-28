@@ -43,7 +43,7 @@ def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
             
     S_Rocker = df['rocker'].apply(score_rocker)
 
-    # 3. Score Schiuma (Energy Return) - Contributo metabolico primario
+    # 3. Score Schiuma (Energy Return)
     S_Foam = df['EnergyIndex'] 
 
     # 4. Score Rigidità Longitudinale (Leverage support)
@@ -52,7 +52,6 @@ def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
     S_Stiffness = S_Stiffness.clip(0, 1)
 
     # FORMULA DRIVE: Sinergia Meccanica (Plate * Rocker * Stiffness) + Contributo Schiuma
-    # La moltiplicazione simula l'effetto leva: se il rocker è 0, la piastra non lavora.
     Mechanical_Drive = S_Plate * S_Rocker * S_Stiffness
     
     # Ponderazione: 60% Meccanica, 40% Materiale (Schiuma)
@@ -83,7 +82,6 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df["EnergyIndex"] = (w_heel * ER_h   + w_mid * ER_m)  / (w_heel + w_mid)
 
     # --- 2. Flex Index (Ottimizzazione non lineare) ---
-    # Riferimento: The effects of footwear midsole longitudinal bending stiffness.
     Flex = df["rigidezza_flex"].astype(float).to_numpy()
     FlexIndex = np.zeros(len(df))
     passi = df["passo"].astype(str).str.lower().to_list()
@@ -99,7 +97,6 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df["FlexIndex"] = FlexIndex
 
     # --- 3. Weight Index (Costo Metabolico) ---
-    # Riferimento: Metabolic cost of running, body weight influence.
     # Regola: +100g = +1% costo energetico.
     W = df["peso"].astype(float).to_numpy()
     W_ref = 180.0 
@@ -111,7 +108,6 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df["WeightIndex"] = WeightIndex
 
     # --- 4. StackFactor ---
-    # Riferimento: The effects of running shoe stack.
     stack = df["altezza_tallone"].astype(float).to_numpy()
     StabilityMod = np.ones(len(df))
     mask_hi = stack > 40
@@ -145,7 +141,7 @@ def calcola_MPIB(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def esegui_clustering(df: pd.DataFrame):
-    """ Esegue clustering K-Means ottimizzato (Elbow + Silhouette). """
+    """ Esegue clustering K-Means ottimizzato. """
 
     def livello_index(val: float) -> str:
         if val < 0.33: return "Basso"
@@ -209,7 +205,7 @@ def esegui_clustering(df: pd.DataFrame):
 
 
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
-    """ Scatter plot interattivo MPI-B vs Prezzo (Plotly Express). """
+    """ Scatter plot interattivo MPI-B vs Prezzo. """
     
     df_val['Status'] = df_val['label'].apply(
         lambda x: 'Selezionato' if x in selected_points_labels else 'Database'
@@ -233,8 +229,8 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
         size_max=20,
         hover_name='hover_text',
         color_discrete_map={
-            'Selezionato': '#FF4B4B', # Rosso Streamlit
-            'Database': '#A9A9A9'     # Grigio neutro
+            'Selezionato': '#FF4B4B', 
+            'Database': '#A9A9A9'     
         },
         custom_data=['label'],
         labels={price_col: f'{price_col} [€]', "MPI_B": "Indice MPI-B"},
@@ -273,9 +269,8 @@ def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Analisi Compar
     }
     
     categories = [metrics_readable.get(m, m) for m in metrics]
-    comparison_colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd'] # Palette tecnica
+    comparison_colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd'] 
     
-    # Loop per modelli di confronto (background)
     for i in range(1, len(df_shoes)):
         row = df_shoes.iloc[i]
         values = [float(row[m]) for m in metrics]
@@ -295,7 +290,6 @@ def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Analisi Compar
             hoveron='points+fills'
         ))
 
-    # Modello selezionato (foreground)
     if not df_shoes.empty:
         row = df_shoes.iloc[0]
         values = [float(row[m]) for m in metrics]
@@ -331,7 +325,7 @@ def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Analisi Compar
     return fig
 
 def trova_scarpe_simili(df, target_label, metrics_cols, n_simili=3):
-    """ Calcolo similarità tramite distanza euclidea su spazio n-dimensionale. """
+    """ Calcolo similarità tramite distanza euclidea. """
     try:
         target_vector = df.loc[df['label'] == target_label, metrics_cols].astype(float).values[0]
         df_calc = df.copy()
@@ -341,13 +335,17 @@ def trova_scarpe_simili(df, target_label, metrics_cols, n_simili=3):
         
         df_calc['distanza_similitudine'] = distances
         
-        # Filtra se stesso e ordina per distanza
         simili = df_calc[df_calc['label'] != target_label].sort_values('distanza_similitudine').head(n_simili)
         return simili
     except Exception as e:
         st.error(f"Errore calcolo vettoriale: {e}")
         return pd.DataFrame()
 
+def render_stars(value):
+    if pd.isna(value): return ""
+    score = int(round(value * 5))
+    score = max(0, min(5, score))
+    return ("★" * score) + ("☆" * (5 - score))
 
 # =========================
 #   APP STREAMLIT
@@ -365,21 +363,46 @@ with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
     
     **1. Costo Metabolico del Peso (Weight Efficiency)**
     *Ogni 100g di massa aggiuntiva aumentano il costo energetico dell'1%.*
-    La funzione di penalità del peso segue un decadimento esponenziale calibrato su questa osservazione.
     * *Fonte:*
     
     **2. Indice di Spinta Meccanica (Drive Index)**
-    La performance non deriva dalla sola piastra, ma dall'interazione ("Teeter-Totter effect") tra la rigidità della piastra e la geometria del rocker in un sistema a perno. Inoltre, la schiuma (PEBA) contribuisce in modo significativo al ritorno elastico.
-    * *Formula:* `Drive = (0.6 * (Plate * Rocker * Stiffness)) + (0.4 * Foam)`
+    La performance deriva dall'interazione ("Teeter-Totter effect") tra piastra e rocker.
     * *Fonte:*
     
     **3. Ottimizzazione Rigidità Longitudinale (Flex Index)**
-    La relazione tra rigidità (Bending Stiffness) ed economia di corsa non è lineare. Esiste un range ottimale; rigidità eccessiva senza adeguata velocità può peggiorare l'economia.
+    La relazione tra rigidità ed economia di corsa non è lineare.
     * *Fonte:*
+    """)
+
+# --- EXPANDER FORMULE MATEMATICHE ---
+with st.expander("📐 Formule Matematiche del Modello AFT"):
+    st.markdown(r"""
+    Il calcolo del punteggio totale MPI-B si basa su una somma pesata di 5 indici normalizzati $[0, 1]$.
     
-    **4. Stack Height e Stabilità**
-    L'aumento dello stack migliora l'ammortizzazione e la lunghezza del passo, ma può compromettere la stabilità biomeccanica se non compensato.
-    * *Fonte:*
+    ### 1. Normalizzazione dei Dati Grezzi
+    Per gli indici lineari (Shock, Energy), utilizziamo il Min-Max scaling sui dati di laboratorio:
+    $$ I_{norm} = \frac{x - x_{min}}{x_{max} - x_{min}} $$
+
+    ### 2. Weight Efficiency Index ($I_{Weight}$)
+    Basato sul decadimento esponenziale del vantaggio metabolico.
+    $$ I_{Weight} = e^{-k \cdot (Peso_{g} - 180)} $$
+    Dove $k \approx 0.005$ per penalizzare fortemente i pesi > 250g.
+
+    ### 3. Flex Index ($I_{Flex}$)
+    Modellazione non lineare dipendente dal passo (Race vs Daily).
+    * **Race (Sigmoide):** Premia la rigidità elevata.
+      $$ I_{Flex, Race} = \frac{1}{1 + e^{-(Flex - 200)/50}} $$
+    * **Daily (Gaussiana):** Premia un valore intermedio ottimale (~150 N/mm).
+      $$ I_{Flex, Daily} = e^{-\frac{(Flex - 150)^2}{2 \cdot 50^2}} $$
+
+    ### 4. Drive Index ($I_{Drive}$)
+    Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
+    $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiffness}) + 0.4 \cdot S_{Foam} $$
+    Dove $S_{Plate}=1.0$ per Carbonio, $S_{Rocker}$ è l'altezza normalizzata della punta.
+
+    ### 5. MPI-B (Mescola Performance Index)
+    Il punteggio finale è la somma pesata dai cursori utente ($w_i$):
+    $$ MPI = w_{Shock} \cdot I_{Shock} + w_{Energy} \cdot I_{Energy} + w_{Flex} \cdot I_{Flex} + w_{Weight} \cdot I_{Weight} $$
     """)
 
 file_name = "database_completo_AFT_20251124_clean.csv"
@@ -648,8 +671,9 @@ if selected_for_detail:
             
             if pd.notna(row.get('ValueIndex')):
                 val_idx = float(row['ValueIndex'])
+                stars = render_stars(val_idx)
                 st.write("**Value Index:**")
-                st.markdown(f"### {val_idx:.3f}")
+                st.markdown(f"### {val_idx:.3f} {stars}")
 
         with col_dx:
             st.write("#### Profilo Biomeccanico")
@@ -713,4 +737,4 @@ if not df_simili.empty:
     st.plotly_chart(fig_radar, use_container_width=True)
             
 else:
-    st.write("Nessun modello comparabile identificato con i filtri attuali.")
+    st.write("Nessun modello simile trovato nei filtri correnti.")
