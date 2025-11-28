@@ -210,7 +210,6 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     for _, row in df_comp.iterrows():
         # --- CORREZIONE: Esegui il casting a float scalarmente ---
         try:
-            # L'uso di float(row[m]) è il metodo più sicuro per estrarre il valore scalare
             values = [float(row[m]) for m in metrics]
         except (ValueError, TypeError) as e:
             # Se ci sono dati non numerici, salta questa riga
@@ -476,15 +475,14 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         st.write("### 📊 Posizionamento MPI vs Prezzo")
         
         # Trova l'indice del modello corrente per preimpostare correttamente la selectbox
-        # FIX: Usiamo l'approccio condizionale corretto per l'indice
         model_list = df_val_sorted['label'].tolist()
         
         if selected_label in model_list:
             selected_index = model_list.index(selected_label)
         else:
             selected_index = 0
-            # Se siamo qui, selected_label non era valido, ma lo stato è stato resettato sopra,
-            # quindi selected_label dovrebbe essere model_list[0] e l'indice è 0.
+            # Aggiorniamo lo stato di sessione con il nuovo default per coerenza
+            st.session_state['selected_point_key'] = model_list[0] 
 
         selected_label_input = st.selectbox(
             "Seleziona un modello per il Dettaglio (o clicca sul grafico per cambiarlo):",
@@ -554,33 +552,24 @@ st.info(f"Stai analizzando il modello: **{selected_for_detail if selected_for_de
 if selected_for_detail:
     scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
     
-    st.subheader(f"🔬 Dettaglio: {selected_for_detail}")
+    # ⚠️ FIX UX: Rimosso il nome del modello da subheader per evitare la ridondanza.
+    st.subheader(f"🔬 Dettaglio Biomeccanico")
 
     # --- INPUT CONFRONTO (Multi-select) ---
     default_comparison = [selected_for_detail]
-    
-    # ⚠️ FIX: Uso una chiave unica per la multiselect e riuso il valore dello stato 
-    # per garantire che la selezione non si 'perda' dopo il rerun.
-    if 'comparison_models' not in st.session_state:
-        st.session_state['comparison_models'] = default_comparison
-
     selezione_confronto = st.multiselect(
         "Seleziona altri modelli per il Radar Chart",
         df_filt["label"].tolist(),
         max_selections=5,
-        default=default_comparison,
-        key='radar_multiselect'
+        default=default_comparison
     )
-    
-    # In questo punto, 'selezione_confronto' è il valore aggiornato.
 
     col_dettaglio, col_confronto_radar = st.columns([1, 2])
 
-    # --- 3A. DETTAGLIO SCARPA (Visualizzazione) ---
+    # --- 3A. DETTAGLIO SCARPA ---
     with col_dettaglio:
         st.subheader("Informazioni Base")
-        st.markdown(f"**Marca:** {scarpa['marca']}")
-        st.markdown(f"**Modello:** {scarpa['modello']}")
+        st.markdown(f"### {scarpa['marca']} {scarpa['modello']}") # Uso markdown per il titolo all'interno
         if "versione" in scarpa and pd.notna(scarpa["versione"]):
             st.write(f"Versione: {int(scarpa['versione'])}")
         st.write(f"Passo / categoria (AFT): {scarpa['passo']}")
@@ -598,34 +587,27 @@ if selected_for_detail:
         st.write("**Cluster:**")
         st.write(f"Cl. {int(scarpa['Cluster'])}: {scarpa['ClusterDescrizione']}")
 
-    # --- 3B. RADAR CHART (Visualizzazione) ---
-with col_confronto_radar:
-    st.subheader("Analisi Biomeccanica (Indici 0-1)")
-    
-    # ⚠️ FIX LOGICO: Controlliamo se la lista selezionata ha almeno un elemento
-    if selezione_confronto:
+    # --- 3B. RADAR CHART ---
+    with col_confronto_radar:
+        st.subheader("Analisi Biomeccanica (Indici 0-1)")
         
-        df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
-        df_comp = df_comp.reset_index(drop=True) 
+        if selezione_confronto:
+            df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
+            df_comp = df_comp.reset_index(drop=True) 
 
-        # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
-        df_comp = df_comp.rename(columns={
-            "ShockIndex_calc": "ShockIndex",
-            "EnergyIndex_calc": "EnergyIndex"
-        })
-        
-        metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-        
-        # Verifichiamo che tutte le colonne siano presenti e che il DataFrame non sia vuoto
-        if all(m in df_comp.columns for m in metrics_plot) and not df_comp.empty:
+            # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
+            df_comp = df_comp.rename(columns={
+                "ShockIndex_calc": "ShockIndex",
+                "EnergyIndex_calc": "EnergyIndex"
+            })
             
-            fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
-            st.pyplot(fig)
+            metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+            
+            if all(m in df_comp.columns for m in metrics_plot):
+                
+                fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
+                st.pyplot(fig)
+            else:
+                st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
-            # Caso: Selezione presente, ma i dati filtrati sono incompleti o non numerici
-            st.info("Dati per il Radar Chart incompleti o non numerici.")
-    else:
-        # Caso: La lista di selezione è vuota
-        st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
-
-
+            st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
