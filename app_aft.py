@@ -195,11 +195,12 @@ def esegui_clustering(df: pd.DataFrame):
 def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     """ 
     Grafico Radar Matplotlib.
-    FIX: Esegue il casting a float durante la lettura per evitare la ValueError di assegnazione.
+    FIX: Legge e casta i dati a float scalarmente per prevenire l'errore di assegnazione
+         sulle copie (Setting with non-unique columns).
     """
     import numpy as np
     
-    # Non è più necessario forzare il casting in-place, lo facciamo durante la lettura.
+    # Non eseguiamo assegnazione in-place su df_comp per prevenire l'errore strutturale.
     
     n_metrics = len(metrics)
     angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False)
@@ -210,15 +211,15 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     ax.set_theta_direction(-1)
 
     for _, row in df_comp.iterrows():
-        # --- CORREZIONE: Esegui il casting a float su ogni valore letto ---
-        # L'uso di float(row[m]) forza la conversione scalare in modo sicuro
+        # --- CORREZIONE: Esegui il casting a float scalarmente ---
+        # Questo risolve sia il problema di tipo (ValueError) sia l'errore strutturale (.loc)
         try:
             values = [float(row[m]) for m in metrics]
         except (ValueError, TypeError) as e:
-            # Gestione minima per dati non numerici (dovrebbe essere pulito dal load_and_process)
+            # Se ci sono dati non numerici, salta questa riga
             print(f"Errore di conversione nel Radar Chart per riga {row[label_col]}: {e}")
-            continue # Salta questa riga corrotta
-        # ------------------------------------------------------------------
+            continue 
+        # --------------------------------------------------------
 
         values = values + [values[0]]
         label = row[label_col]
@@ -635,6 +636,7 @@ if selected_for_detail:
                 st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
             st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+
 
 
 
