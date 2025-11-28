@@ -558,16 +558,25 @@ if selected_for_detail:
 
     # --- INPUT CONFRONTO (Multi-select) ---
     default_comparison = [selected_for_detail]
+    
+    # ⚠️ FIX: Uso una chiave unica per la multiselect e riuso il valore dello stato 
+    # per garantire che la selezione non si 'perda' dopo il rerun.
+    if 'comparison_models' not in st.session_state:
+        st.session_state['comparison_models'] = default_comparison
+
     selezione_confronto = st.multiselect(
         "Seleziona altri modelli per il Radar Chart",
         df_filt["label"].tolist(),
         max_selections=5,
-        default=default_comparison
+        default=default_comparison,
+        key='radar_multiselect'
     )
+    
+    # In questo punto, 'selezione_confronto' è il valore aggiornato.
 
     col_dettaglio, col_confronto_radar = st.columns([1, 2])
 
-    # --- 3A. DETTAGLIO SCARPA ---
+    # --- 3A. DETTAGLIO SCARPA (Visualizzazione) ---
     with col_dettaglio:
         st.subheader("Informazioni Base")
         st.markdown(f"**Marca:** {scarpa['marca']}")
@@ -589,11 +598,13 @@ if selected_for_detail:
         st.write("**Cluster:**")
         st.write(f"Cl. {int(scarpa['Cluster'])}: {scarpa['ClusterDescrizione']}")
 
-    # --- 3B. RADAR CHART ---
+    # --- 3B. RADAR CHART (Visualizzazione) ---
     with col_confronto_radar:
         st.subheader("Analisi Biomeccanica (Indici 0-1)")
         
+        # ⚠️ FIX LOGICO: Controlliamo se la lista selezionata ha almeno un elemento
         if selezione_confronto:
+            
             df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
             df_comp = df_comp.reset_index(drop=True) 
 
@@ -605,7 +616,8 @@ if selected_for_detail:
             
             metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
             
-            if all(m in df_comp.columns for m in metrics_plot):
+            # Verifichiamo che tutte le colonne siano presenti prima di plottare
+            if all(m in df_comp.columns for m in metrics_plot) and not df_comp.empty:
                 
                 fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
                 st.pyplot(fig)
@@ -613,3 +625,7 @@ if selected_for_detail:
                 st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
             st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+                st.info("Dati per il Radar Chart incompleti o non numerici.")
+        else:
+            st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+
