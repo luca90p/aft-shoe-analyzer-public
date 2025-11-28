@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt # Mantenuto per il Radar Plot
-import plotly.express as px # Nuovo import per lo Scatter Plot interattivo
-import plotly.graph_objects as go # Usato per personalizzazione Plotly
+import plotly.express as px
+import plotly.graph_objects as go # Non strettamente necessario qui, ma utile per future personalizzazioni
 
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
@@ -11,9 +11,6 @@ from sklearn.metrics import silhouette_samples
 # =========================
 #   FUNZIONI AFT (CORE LOGIC)
 # =========================
-
-# --- MANTENIAMO calcola_indici, calcola_MPIB, esegui_clustering, plot_radar_indices ---
-# (Le tue funzioni esistenti sono corrette e non richiedono modifiche qui)
 
 def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     """ Calcola gli indici biomeccanici normalizzati. """
@@ -221,20 +218,15 @@ def plot_radar_indices(df_comp, metrics, label_col="label"):
     return fig
 
 
-# --- NUOVA FUNZIONE DI PLOTTING INTERATTIVO CON PLOTLY ---
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
-    """
-    Scatter plot MPI-B vs Prezzo usando Plotly per l'interattività (hover e click).
-    """
+    """ Scatter plot MPI-B vs Prezzo usando Plotly per l'interattività (hover e click). """
     
     df_val['Colore_Evidenziazione'] = df_val['label'].apply(
         lambda x: 'Selezionato' if x in selected_points_labels else 'Mercato'
     )
     
-    # Ordiniamo per far apparire i punti selezionati sopra gli altri
     df_val = df_val.sort_values(by='Colore_Evidenziazione', ascending=False).reset_index(drop=True)
     
-    # Aggiungiamo ValueIndex al testo hover per visualizzare i dettagli on-hover
     df_val['hover_text'] = df_val.apply(
         lambda row: f"<b>{row['label']}</b><br>"
                     f"MPI-B: {row['MPI_B']:.3f}<br>"
@@ -247,34 +239,31 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
         x=price_col,
         y="MPI_B",
         color='Colore_Evidenziazione',
-        hover_data=['label', 'MPI_B', PRICE_COL, 'ValueIndex'], # Manteniamo solo le colonne principali
+        hover_name='hover_text', # Usiamo il testo personalizzato nell'hover
         color_discrete_map={
             'Selezionato': 'red',
             'Mercato': 'gray'
         },
-        custom_data=['label'], # Dati da recuperare al click
+        custom_data=['label'],
         labels={price_col: f'{price_col} (€)', "MPI_B": "MPI-B Score"},
         title="MPI-B Score vs. Prezzo (Performance vs. Costo)"
     )
 
-    # Personalizzazione dei marker
     fig.update_traces(
         marker=dict(
             size=10,
             opacity=0.7,
-            line=dict(width=1, color='black') # Contorno scuro per i punti selezionati
+            line=dict(width=1, color='black')
         ),
         selector=dict(mode='markers')
     )
     
-    # Personalizzazione del layout
     fig.update_layout(
         hovermode="closest",
         yaxis=dict(range=[0, 1.05]),
         legend_title_text='Punti Dati'
     )
     
-    # Aggiungiamo un box di annotazione fissa per spiegare l'interazione
     fig.add_annotation(
         x=df_val[price_col].mean(), 
         y=1.05,
@@ -371,6 +360,7 @@ with st.sidebar:
 # ============================================
 
 st.header("Step 1: Personalizza i tuoi Criteri di Performance (MPI)")
+st.info("Regola i parametri qui sotto per calcolare l'MPI Score in base alle **tue esigenze di corsa**.")
 
 col_appoggio, col_pesi = st.columns(2)
 
@@ -382,8 +372,7 @@ with col_appoggio:
         min_value=0,
         max_value=100,
         value=40,
-        step=5,
-        help="Influenza la ponderazione tra tallone e avampiede nei calcoli Shock e Energy."
+        step=5
     )
     w_heel = heel_pct / 100.0
     w_mid = 1.0 - w_heel
@@ -422,8 +411,8 @@ df_filt["EnergyIndex_calc"] = safe_minmax_series(df_filt["EnergyIndex_calc"])
 df_filt.loc[:, "MPI_B"] = (
     w_shock_eff  * df_filt["ShockIndex_calc"] +
     w_energy_eff * df_filt["EnergyIndex_calc"] +
-    w_flex_eff   * df_filt["FlexIndex"] +
-    w_weight_eff * df_filt["WeightIndex"]
+    df_filt["FlexIndex"] * w_flex_eff +
+    df_filt["WeightIndex"] * w_weight_eff
 ).round(3)
 
 # Ricalcolo Value Index
@@ -440,7 +429,6 @@ else:
     df_filt["ValueIndex"] = 0.0
 
 st.success("MPI Score ricalcolato in base ai tuoi criteri!")
-
 st.markdown("---")
 
 # ============================================
@@ -464,42 +452,32 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         
         # 2A. SCATTER PLOT INTERATTIVO (Plotly)
         st.write("### 📊 Posizionamento MPI vs Prezzo")
-        st.info("Passa il mouse sui punti per i dettagli. Clicca su un punto per selezionarlo per l'analisi dettagliata (Step 3).")
+        st.info("Passa il mouse sui punti per i dettagli. **Clicca** su un punto per selezionarlo per l'analisi dettagliata (Step 3).")
         
         selected_points_labels = [selected_label] if selected_label else []
         
         fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
         
-        # UTILIZZO L'API STANDARD DI STREAMLIT PER CATTURARE LA SELEZIONE
-        # Uso 'selection_mode="single"' per forzare la selezione di un solo punto alla volta.
-        # Assegno una 'key' per identificare il componente.
-        
+        # Utilizzo dell'API standard di Streamlit per catturare la selezione al click
         plotly_event = st.plotly_chart(
             fig_scatter, 
             use_container_width=True, 
-            selection_mode="single", # Permette solo la selezione di un punto
+            selection_mode="single",
             key='mpi_scatter_chart'
         )
 
         # CATTURA DELL'EVENTO DI SELEZIONE DAL VALORE DI RITORNO
-        # st.plotly_chart ritorna None o un dictionary con i dati del punto selezionato
-        
         if plotly_event and plotly_event.get('selection'):
             selection_data = plotly_event['selection']
             
-            # Verifico se ci sono punti selezionati e customdata
             if selection_data.get('points') and selection_data['points'][0].get('customdata'):
-                # Il label della scarpa è in customdata[0]
                 new_selection = selection_data['points'][0]['customdata'][0]
                 
-                # Aggiorno lo stato se la selezione è cambiata
                 if new_selection != st.session_state['selected_point_key']:
                     st.session_state['selected_point_key'] = new_selection
-                    # Ricarica la pagina per aggiornare lo Step 3
-                    st.rerun()
+                    st.rerun() # Ricarica per aggiornare Step 3
 
         # 2B. CLASSIFICA VALUE INDEX
-        # ... (Resto del codice di Step 2) ...
         st.write("### 🏆 Classifica Qualità/Prezzo (MPI-B / Costo)")
         df_val_sorted = df_val.sort_values(by="ValueIndex", ascending=False)
         cols_show = ["label", "passo", "MPI_B", PRICE_COL, "ValueIndex"]
@@ -516,17 +494,18 @@ else:
 
 
 # ============================================
-# 3. ANALISI DI DETTAGLIO E CONFRONTO (MODIFICHE MINIME)
+# 3. ANALISI DI DETTAGLIO E CONFRONTO
 # ============================================
 
-# Qui usiamo la chiave di sessione aggiornata
+st.header("Step 3: Analisi di Dettaglio e Confronto")
+
 selected_for_detail = st.session_state['selected_point_key']
 
-# Se la selezione è vuota (primo load), usiamo il primo elemento della classifica Value Index
+# Se la selezione è vuota, usa il primo elemento della classifica Value Index come default
 if not selected_for_detail and not df_val_sorted.empty:
     selected_for_detail = df_val_sorted.iloc[0]['label']
     
-# ... (il resto del codice di Step 3 rimane invariato)
+st.info(f"Stai analizzando il modello: **{selected_for_detail if selected_for_detail else 'Nessun modello selezionato'}**")
 
 
 if selected_for_detail:
@@ -534,9 +513,18 @@ if selected_for_detail:
     
     st.subheader(f"🔬 Dettaglio: {selected_for_detail}")
 
-    col_dettaglio, col_confronto = st.columns([1, 2])
+    # --- INPUT CONFRONTO (Prima del dettaglio) ---
+    default_comparison = [selected_for_detail]
+    selezione_confronto = st.multiselect(
+        "Seleziona altri modelli per il Radar Chart",
+        df_filt["label"].tolist(),
+        max_selections=5,
+        default=default_comparison
+    )
 
-    # --- 3A. DETTAGLIO SCARPA (FISSO) ---
+    col_dettaglio, col_confronto_radar = st.columns([1, 2])
+
+    # --- 3A. DETTAGLIO SCARPA ---
     with col_dettaglio:
         st.subheader("Informazioni Base")
         st.markdown(f"**Marca:** {scarpa['marca']}")
@@ -553,44 +541,27 @@ if selected_for_detail:
         st.metric("MPI-B Score", f"{scarpa['MPI_B']:.3f}")
         if "ValueIndex" in scarpa.index and pd.notna(scarpa["ValueIndex"]):
             st.write(f"Value index (0–1): {scarpa['ValueIndex']:.3f}")
-
-    # --- 3B. CONTROLLI CONFRONTO E RADAR ---
-    with col_confronto:
-        st.subheader("Confronta Profilo")
-        
-        # Pre-selezione per il multiselect (include sempre il dettaglio)
-        default_comparison = [selected_for_detail]
-        
-        selezione_confronto = st.multiselect(
-            "Seleziona altri modelli per il Radar Chart",
-            df_filt["label"].tolist(),
-            max_selections=5,
-            default=default_comparison
-        )
         
         st.markdown("---")
-        st.write("**Profilo Biomeccanico (Radar)**")
+        st.write("**Cluster:**")
+        st.write(f"Cl. {int(scarpa['Cluster'])}: {scarpa['ClusterDescrizione']}")
+
+    # --- 3B. RADAR CHART ---
+    with col_confronto_radar:
+        st.subheader("Analisi Biomeccanica (Indici 0-1)")
         
         if selezione_confronto:
             df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
 
+            # Usiamo gli indici ricalcolati ShockIndex_calc e EnergyIndex_calc
             metrics = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
-            metrics = [m for m in metrics if m in df_comp.columns]
             
-            # Rinomina gli indici calcolati per il radar
             df_comp = df_comp.rename(columns={
                 "ShockIndex_calc": "ShockIndex",
                 "EnergyIndex_calc": "EnergyIndex"
             })
 
-            if metrics:
-                fig = plot_radar_indices(df_comp, metrics, label_col="label")
-                st.pyplot(fig)
-            else:
-                st.info("Indici per il radar non disponibili.")
+            fig = plot_radar_indices(df_comp, ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"], label_col="label")
+            st.pyplot(fig)
         else:
-            st.warning("Seleziona almeno un modello per il Radar Chart.")
-
-else:
-    st.info("Per favore, clicca su un punto nel grafico MPI vs Prezzo (Step 2) per iniziare l'analisi dettagliata.")
-
+            st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
