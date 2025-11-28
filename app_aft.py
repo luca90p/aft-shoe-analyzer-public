@@ -399,7 +399,7 @@ st.success("MPI Score ricalcolato in base ai tuoi criteri!")
 st.markdown("---")
 
 # ============================================
-# 2. RISULTATI GLOBALI INTERATTIVI (Grafico e Classifica)
+# 2. RISULTATI GLOBALI INTERATTIVI
 # ============================================
 
 st.header("Step 2: Analisi di Mercato (MPI vs Prezzo)")
@@ -419,22 +419,25 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         if 'selected_point_key' not in st.session_state:
             st.session_state['selected_point_key'] = default_label_on_load
         
-        # ⚠️ FIX CRUCIALE PER IL VALUE ERROR:
-        # Se il modello salvato in session_state NON è nella lista filtrata (es. dopo un cambio filtro),
-        # forziamo il reset al primo modello valido della lista corrente.
-        current_model_list = df_val_sorted['label'].tolist()
-        
-        if st.session_state['selected_point_key'] not in current_model_list:
-             st.session_state['selected_point_key'] = current_model_list[0]
+        # FIX: Se il modello precedentemente selezionato non è nel nuovo filtro, resettiamo il default.
+        if st.session_state['selected_point_key'] not in df_val_sorted['label'].tolist():
+             st.session_state['selected_point_key'] = default_label_on_load
         
         selected_label = st.session_state['selected_point_key']
         
         # 2B. SELEZIONE UNIFICATA (Selectbox e Grafico)
         st.write("### 📊 Posizionamento MPI vs Prezzo")
         
-        # Ora siamo sicuri che selected_label esiste in current_model_list
-        # Quindi .index() non darà mai ValueError
-        selected_index = current_model_list.index(selected_label)
+        # Trova l'indice del modello corrente per preimpostare correttamente la selectbox
+        current_model_list = df_val_sorted['label'].tolist()
+        
+        if selected_label in current_model_list:
+            selected_index = current_model_list.index(selected_label)
+        else:
+            selected_index = 0
+            # Aggiorniamo lo stato di sessione con il nuovo default per coerenza
+            st.session_state['selected_point_key'] = current_model_list[0] 
+            selected_label = current_model_list[0]
 
         selected_label_input = st.selectbox(
             "🔎 **Trova ed evidenzia un modello nel grafico e nella scheda dettagli:**",
@@ -468,7 +471,7 @@ else:
 
 
 # ============================================
-# 3. SCHEDA DETTAGLIO (Reintrodotta)
+# 3. SCHEDA DETTAGLIO (Reintrodotta con Valori Visibili)
 # ============================================
 
 st.markdown("---")
@@ -478,7 +481,12 @@ selected_for_detail = st.session_state['selected_point_key']
 
 if selected_for_detail:
     # Estraiamo i dati per la card
-    row = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
+    # Usiamo il dataset filtrato per avere i dati corretti, assicurandoci che esista
+    try:
+        row = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
+    except IndexError:
+        st.warning("Il modello selezionato non è presente nei filtri correnti.")
+        st.stop()
     
     # Container visuale per la "Card"
     with st.container():
@@ -501,15 +509,21 @@ if selected_for_detail:
             st.write(f"**Cluster:** {int(row['Cluster'])} – {row['ClusterDescrizione']}")
             
             st.markdown("---")
-            # Progress bars per gli indici (0-1)
-            st.write("Shock Absorption (Ammortizz.)")
-            st.progress(float(row['ShockIndex_calc']))
             
-            st.write("Energy Return (Reattività)")
-            st.progress(float(row['EnergyIndex_calc']))
+            # Visualizzazione con VALORI ESPLICITI nel testo (perché st.progress non ha hover)
             
-            st.write("Flexibility (Rigidità)")
-            st.progress(float(row['FlexIndex']))
+            val_shock = float(row['ShockIndex_calc'])
+            st.write(f"**Shock Absorption:** {val_shock:.3f} / 1.0")
+            st.progress(val_shock)
             
-            st.write("Weight Efficiency (Leggerezza)")
-            st.progress(float(row['WeightIndex']))
+            val_energy = float(row['EnergyIndex_calc'])
+            st.write(f"**Energy Return:** {val_energy:.3f} / 1.0")
+            st.progress(val_energy)
+            
+            val_flex = float(row['FlexIndex'])
+            st.write(f"**Flexibility (Score):** {val_flex:.3f} / 1.0")
+            st.progress(val_flex)
+            
+            val_weight = float(row['WeightIndex'])
+            st.write(f"**Weight Efficiency:** {val_weight:.3f} / 1.0")
+            st.progress(val_weight)
