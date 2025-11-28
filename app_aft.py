@@ -193,9 +193,20 @@ def esegui_clustering(df: pd.DataFrame):
     return df, cluster_summary
 
 
-def plot_radar_indices(df_comp, metrics, label_col="label"):
-    """ Grafico Radar Matplotlib (Mantenuto per la coerenza) """
+def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
+    """ 
+    Grafico Radar Matplotlib.
+    FIX: Forza la conversione float per prevenire errori di tipo (ValueError: setting an array element with a sequence).
+    """
     import numpy as np
+    
+    # --- FIX: Forza la conversione a float per garantire che ogni cella sia un valore scalare ---
+    for m in metrics:
+        if m in df_comp.columns:
+            # Usiamo .loc per evitare SettingWithCopyWarning
+            df_comp.loc[:, m] = df_comp[m].astype(float) 
+    # -----------------------------------------------------------------------------------------
+    
     n_metrics = len(metrics)
     angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False)
     angles = np.concatenate([angles, [angles[0]]])
@@ -205,6 +216,7 @@ def plot_radar_indices(df_comp, metrics, label_col="label"):
     ax.set_theta_direction(-1)
 
     for _, row in df_comp.iterrows():
+        # Qui Matplotlib riceve solo float
         values = [row[m] for m in metrics]
         values = values + [values[0]]
         label = row[label_col]
@@ -402,6 +414,7 @@ S_mid  = safe_minmax_series(df_filt["shock_abs_mesopiede"])
 ER_h   = safe_minmax_series(df_filt["energy_ret_tallone"])
 ER_m   = safe_minmax_series(df_filt["energy_ret_mesopiede"])
 
+# Nota: Usiamo .loc per assegnare nuovi indici calcolati
 df_filt.loc[:, "ShockIndex_calc"] = (w_heel * S_heel + w_mid * S_mid)
 df_filt.loc[:, "EnergyIndex_calc"] = (w_heel * ER_h   + w_mid * ER_m)
 df_filt["ShockIndex_calc"] = safe_minmax_series(df_filt["ShockIndex_calc"])
@@ -466,17 +479,15 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
             key='mpi_scatter_chart' # La chiave per recuperare i dati in session_state
         )
 
-        # CATTURA DELL'EVENTO DI SELEZIONE TRAMITE SESSION_STATE (Gestione robusta)
+        # CATTURA DELL'EVENTO DI SELEZIONE TRAMITE SESSION_STATE
         
-        # Recupera lo stato di selezione assegnato automaticamente da Streamlit
         selection_data_state = st.session_state.get('mpi_scatter_chart')
 
-        # Analizza i dati solo se la chiave è presente e contiene una selezione
+        # Analizza se sono stati selezionati punti
         if selection_data_state and selection_data_state.get('selection'):
             selection_points = selection_data_state['selection'].get('points')
             
             if selection_points and selection_points[0].get('customdata'):
-                # Il label della scarpa è in customdata[0]
                 new_selection = selection_points[0]['customdata'][0]
                 
                 # Aggiorno lo stato se la selezione è cambiata
@@ -499,6 +510,7 @@ else:
     st.warning("Colonna prezzo non disponibile nel dataset per l'analisi. Impossibile procedere.")
     st.stop()
 
+
 # ============================================
 # 3. ANALISI DI DETTAGLIO E CONFRONTO
 # ============================================
@@ -515,6 +527,7 @@ st.info(f"Stai analizzando il modello: **{selected_for_detail if selected_for_de
 
 
 if selected_for_detail:
+    # Usiamo .iloc[0] perché è garantito che la riga esista
     scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
     
     st.subheader(f"🔬 Dettaglio: {selected_for_detail}")
@@ -553,32 +566,28 @@ if selected_for_detail:
         st.write(f"Cl. {int(scarpa['Cluster'])}: {scarpa['ClusterDescrizione']}")
 
     # --- 3B. RADAR CHART ---
-with col_confronto_radar:
-    st.subheader("Analisi Biomeccanica (Indici 0-1)")
-    
-    if selezione_confronto:
-        df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
+    with col_confronto_radar:
+        st.subheader("Analisi Biomeccanica (Indici 0-1)")
+        
+        if selezione_confronto:
+            df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
 
-        # Definiamo le metriche da usare nel plot (usando i nomi *_calc per Shock/Energy)
-        metrics_calc = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
-        
-        # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
-        df_comp = df_comp.rename(columns={
-            "ShockIndex_calc": "ShockIndex",
-            "EnergyIndex_calc": "EnergyIndex"
-        })
-        
-        # Le colonne effettivamente passate al plot devono essere i nomi rinominati
-        metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-        
-        # Verifichiamo che tutte le colonne necessarie esistano (dovrebbero esistere grazie al ricalcolo)
-        if all(m in df_comp.columns for m in metrics_plot):
+            # Usiamo gli indici ricalcolati ShockIndex_calc e EnergyIndex_calc
             
-            fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
-            st.pyplot(fig)
+            # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
+            df_comp = df_comp.rename(columns={
+                "ShockIndex_calc": "ShockIndex",
+                "EnergyIndex_calc": "EnergyIndex"
+            })
+            
+            # Le colonne effettivamente passate al plot devono essere i nomi rinominati
+            metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+            
+            if all(m in df_comp.columns for m in metrics_plot):
+                
+                fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
+                st.pyplot(fig)
+            else:
+                st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
-            st.info("Dati per il Radar Chart incompleti o non numerici.")
-    else:
-        st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
-
-
+            st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
