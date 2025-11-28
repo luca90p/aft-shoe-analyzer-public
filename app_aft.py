@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt # Mantenuto per il Radar Plot
+import matplotlib.pyplot as plt
 import plotly.express as px
 
 from sklearn.cluster import KMeans
@@ -202,7 +202,7 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     # --- FIX: Forza la conversione a float in-place per il plotting ---
     for m in metrics:
         if m in df_comp.columns:
-            df_comp[m] = df_comp[m].astype(float) 
+            df_comp.loc[:, m] = df_comp[m].astype(float) 
     # ------------------------------------------------------------------
     
     n_metrics = len(metrics)
@@ -230,10 +230,12 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     """ Scatter plot MPI-B vs Prezzo usando Plotly per l'interattività (hover e click). """
     
+    # Crea la colonna per l'evidenziazione
     df_val['Colore_Evidenziazione'] = df_val['label'].apply(
         lambda x: 'Selezionato' if x in selected_points_labels else 'Mercato'
     )
     
+    # Ordina per portare i punti selezionati in primo piano nel grafico
     df_val = df_val.sort_values(by='Colore_Evidenziazione', ascending=False).reset_index(drop=True)
     
     df_val['hover_text'] = df_val.apply(
@@ -453,47 +455,61 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
     
     if not df_val.empty:
         
-        # Inizializzazione Session State per la selezione
+        # 2A. INIZIALIZZAZIONE SELEZIONE (Primo modello più performante/economico)
+        df_val_sorted = df_val.sort_values(by="ValueIndex", ascending=False)
+        default_label = df_val_sorted.iloc[0]['label']
+        
+        # Inizializzazione Session State per la selezione (solo se non è mai stata selezionata)
         if 'selected_point_key' not in st.session_state:
-            st.session_state['selected_point_key'] = None
+            st.session_state['selected_point_key'] = default_label
         
-        selected_label = st.session_state['selected_point_key'] if st.session_state['selected_point_key'] else None
+        selected_label = st.session_state['selected_point_key']
         
-        # 2A. SCATTER PLOT INTERATTIVO (Plotly)
+        # 2B. SCATTER PLOT INTERATTIVO (Plotly)
         st.write("### 📊 Posizionamento MPI vs Prezzo")
-        st.info("Passa il mouse sui punti per i dettagli. **Clicca** su un punto per selezionarlo per l'analisi dettagliata (Step 3).")
         
-        selected_points_labels = [selected_label] if selected_label else []
+        # Selectbox (Metodo di controllo stabile)
+        selected_label_input = st.selectbox(
+            "Seleziona un modello per il Dettaglio (o clicca sul grafico per cambiarlo):",
+            df_val_sorted['label'].tolist(),
+            index=df_val_sorted['label'].tolist().index(selected_label)
+        )
+        
+        # Aggiorna lo stato se l'utente cambia la selectbox
+        if selected_label_input != st.session_state['selected_point_key']:
+             st.session_state['selected_point_key'] = selected_label_input
+             st.rerun() # Ricarica per aggiornare Step 3
+
+        selected_points_labels = [st.session_state['selected_point_key']]
         
         fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
         
         # Utilizzo dell'API standard di Streamlit per catturare la selezione al click
+        # NOTA: Il risultato della selezione al click è ora gestito implicitamente
+        # tramite la chiave 'mpi_scatter_chart' in st.session_state.
         st.plotly_chart(
             fig_scatter, 
             use_container_width=True, 
             selection_mode="single",
-            key='mpi_scatter_chart' # La chiave per recuperare i dati in session_state
+            key='mpi_scatter_chart' 
         )
 
-        # CATTURA DELL'EVENTO DI SELEZIONE TRAMITE SESSION_STATE
-        
+        # CATTURA DELL'EVENTO DI SELEZIONE DAL MOUSE (Post-Plot)
         selection_data_state = st.session_state.get('mpi_scatter_chart')
-
-        # Analizza se sono stati selezionati punti
+        
+        # Questo blocco ora gestisce l'aggiornamento solo se il grafico Plotly ha restituito un click
         if selection_data_state and selection_data_state.get('selection'):
             selection_points = selection_data_state['selection'].get('points')
             
             if selection_points and selection_points[0].get('customdata'):
                 new_selection = selection_points[0]['customdata'][0]
                 
-                # Aggiorno lo stato se la selezione è cambiata
                 if new_selection != st.session_state['selected_point_key']:
                     st.session_state['selected_point_key'] = new_selection
-                    st.rerun() # Ricarica per aggiornare Step 3
+                    st.rerun() 
 
-        # 2B. CLASSIFICA VALUE INDEX
+        # 2C. CLASSIFICA VALUE INDEX
         st.write("### 🏆 Classifica Qualità/Prezzo (MPI-B / Costo)")
-        df_val_sorted = df_val.sort_values(by="ValueIndex", ascending=False)
         cols_show = ["label", "passo", "MPI_B", PRICE_COL, "ValueIndex"]
         st.dataframe(df_val_sorted[[c for c in cols_show if c in df_val_sorted.columns]], use_container_width=True)
 
@@ -513,22 +529,17 @@ else:
 
 st.header("Step 3: Analisi di Dettaglio e Confronto")
 
-selected_for_detail = st.session_state.get('selected_point_key')
-
-# Se la selezione è vuota, usa il primo elemento della classifica Value Index come default
-if not selected_for_detail and not df_val_sorted.empty:
-    selected_for_detail = df_val_sorted.iloc[0]['label']
+selected_for_detail = st.session_state['selected_point_key']
     
 st.info(f"Stai analizzando il modello: **{selected_for_detail if selected_for_detail else 'Nessun modello selezionato'}**")
 
 
 if selected_for_detail:
-    # Usiamo .iloc[0] perché è garantito che la riga esista (poiché viene dalla classifica filtrata)
     scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
     
     st.subheader(f"🔬 Dettaglio: {selected_for_detail}")
 
-    # --- INPUT CONFRONTO (Prima del dettaglio) ---
+    # --- INPUT CONFRONTO (Multi-select) ---
     default_comparison = [selected_for_detail]
     selezione_confronto = st.multiselect(
         "Seleziona altri modelli per il Radar Chart",
