@@ -1,9 +1,8 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt 
+# Rimosso matplotlib.pyplot in quanto il radar non viene più usato
 import plotly.express as px
-import plotly.graph_objects as go
 
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
@@ -193,46 +192,8 @@ def esegui_clustering(df: pd.DataFrame):
     return df, cluster_summary
 
 
-def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
-    """ 
-    Grafico Radar Matplotlib.
-    FIX: Legge e casta i dati a float scalarmente per prevenire l'errore strutturale.
-    """
-    import numpy as np
-    
-    n_metrics = len(metrics)
-    angles = np.linspace(0, 2 * np.pi, n_metrics, endpoint=False)
-    angles = np.concatenate([angles, [angles[0]]])
-
-    fig, ax = plt.subplots(subplot_kw={"polar": True})
-    ax.set_theta_offset(np.pi / 2)
-    ax.set_theta_direction(-1)
-
-    for _, row in df_comp.iterrows():
-        # --- CORREZIONE: Esegui il casting a float scalarmente ---
-        try:
-            # Assicurati che le colonne siano di tipo float
-            values = [float(row[m]) for m in metrics]
-        except (ValueError, TypeError) as e:
-            # Se ci sono dati non numerici, salta questa riga
-            print(f"Errore di conversione nel Radar Chart per riga {row[label_col]}: {e}")
-            continue 
-        # --------------------------------------------------------
-
-        values = values + [values[0]]
-        label = row[label_col]
-        ax.plot(angles, values, linewidth=2, label=label)
-        ax.fill(angles, values, alpha=0.15)
-
-    ax.set_thetagrids(angles[:-1] * 180 / np.pi, metrics)
-    ax.set_ylim(0, 1)
-    ax.grid(True)
-    ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
-    return fig
-
-
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
-    """ Scatter plot MPI-B vs Prezzo usando Plotly per l'interattività (solo hover). """
+    """ Scatter plot MPI-B vs Prezzo usando Plotly (solo hover, senza click). """
     
     # Crea la colonna per l'evidenziazione
     df_val['Colore_Evidenziazione'] = df_val['label'].apply(
@@ -488,7 +449,7 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         # Aggiorna lo stato se l'utente cambia la selectbox
         if selected_label_input != st.session_state['selected_point_key']:
              st.session_state['selected_point_key'] = selected_label_input
-             st.rerun() # Ricarica per aggiornare Step 3
+             st.rerun() # Forza il rerun se la selectbox cambia
 
         selected_points_labels = [st.session_state['selected_point_key']]
         
@@ -541,7 +502,7 @@ if selected_for_detail:
         st.session_state['radar_comparison'] = default_comparison
 
     selezione_confronto = st.multiselect(
-        "Seleziona modelli da comparare nel Radar Chart (max 5)",
+        "Seleziona modelli da comparare nella Tabella (max 5)",
         df_filt["label"].tolist(),
         max_selections=5,
         default=st.session_state['radar_comparison'],
@@ -575,63 +536,45 @@ if selected_for_detail:
         st.write("**Cluster:**")
         st.write(f"Cl. {int(scarpa['Cluster'])}: {scarpa['ClusterDescrizione']}")
 
-   # --- 3B. RADAR CHART ---
-with col_confronto_radar:
-    st.subheader("Analisi Biomeccanica (Indici 0-1)")
-    
-    if selezione_confronto:
-        df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
-        df_comp = df_comp.reset_index(drop=True) 
-
-        # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO
-        df_comp = df_comp.rename(columns={
-            "ShockIndex_calc": "ShockIndex",
-            "EnergyIndex_calc": "EnergyIndex"
-        })
+    # --- 3B. TABELLA DI CONFRONTO FINALE ---
+    with col_confronto_radar:
+        st.subheader("Tabella di Confronto Biomeccanico")
         
-        metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-        
-        # Colonne numeriche da pulire per la tabella
-        cols_to_clean = ["MPI_B", "ValueIndex"] + metrics_plot
-        
-        # --- FIX: CICLO DI PULIZIA 1D (CON TRY/EXCEPT CORRETTO) ---
-        try:
-            for col in cols_to_clean:
-                if col in df_comp.columns:
-                    # Converti la Series 1D alla volta, risolvendo l'errore "arg must be 1-d"
-                    df_comp.loc[:, col] = pd.to_numeric(
-                        df_comp[col], 
-                        errors='coerce'
-                    ).astype(float).round(3)
-        except Exception as e:
-            # Se la pulizia fallisce (es. dati corrotti nel CSV), gestiamo l'errore
-            st.error(f"Errore di pulizia dati: Il contesto del DataFrame è instabile. Dettaglio: {e}")
-            st.stop()
-        # ---------------------------------------------------------------------------
+        if selezione_confronto:
+            df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
+            df_comp = df_comp.reset_index(drop=True) 
 
-
-        if all(m in df_comp.columns for m in metrics_plot) and not df_comp.empty:
+            # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
+            df_comp = df_comp.rename(columns={
+                "ShockIndex_calc": "ShockIndex",
+                "EnergyIndex_calc": "EnergyIndex"
+            })
             
-            # Aggiungi una tabella di confronto (se ci sono più di 1 elemento)
-            if len(selezione_confronto) > 1:
-                st.markdown("#### Tabella Comparativa")
-                cols_table = ["label", "MPI_B", "ValueIndex"] + metrics_plot
-                cols_table = [c for c in cols_table if c in df_comp.columns]
+            metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+            
+            # 1. Definizione colonne per la tabella (incluso Price e Value)
+            cols_table = ["label", "MPI_B", "ValueIndex"] + metrics_plot
+            cols_table = [c for c in cols_table if c in df_comp.columns]
+            
+            # 2. Pulizia Tipi per Tabella (Cruciale per PyArrow)
+            try:
+                for col in [c for c in cols_table if c != "label"]:
+                    # Converte forzatamente i valori numerici e assegna il float
+                    df_comp.loc[:, col] = pd.to_numeric(df_comp[col], errors='coerce').astype(float)
+            except Exception as e:
+                st.error(f"Errore di pulizia dati (PyArrow): {e}")
+                st.stop()
+            # -------------------------------------------------------------
+            
+            
+            if not df_comp.empty:
                 
                 # df_display è una copia per la visualizzazione con arrotondamento
                 df_display = df_comp[cols_table].copy()
                 df_display.iloc[:, 1:] = df_display.iloc[:, 1:].round(3) 
 
                 st.dataframe(df_display, use_container_width=True)
-            
-            st.markdown("#### Profilo Radar")
-            # Qui il Radar Plot è sicuro
-            fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
-            st.pyplot(fig)
+            else:
+                st.info("Nessun dato disponibile per i modelli selezionati (controlla i filtri).")
         else:
-            st.info("Dati per il Radar Chart incompleti o non numerici.")
-    else:
-        st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
-
-
-
+            st.warning("Seleziona almeno un modello per visualizzare il confronto.")
