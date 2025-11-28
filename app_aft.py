@@ -199,10 +199,7 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
         lambda x: 'Selezionato' if x in selected_points_labels else 'Mercato'
     )
     
-    # 1. Ordinamento Z-Order:
-    # Vogliamo che 'Mercato' venga disegnato PRIMA e 'Selezionato' DOPO (sopra).
-    # 'Mercato' viene prima di 'Selezionato' in ordine alfabetico.
-    # Quindi ascending=True mette prima Mercato (sotto) e poi Selezionato (sopra).
+    # Ordina per portare i punti selezionati in primo piano nel grafico
     df_val = df_val.sort_values(by='Colore_Evidenziazione', ascending=True).reset_index(drop=True)
     
     df_val['hover_text'] = df_val.apply(
@@ -212,14 +209,13 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
                     f"Value Index: {row['ValueIndex']:.3f}", axis=1
     )
 
-    # 2. Configurazione Grafico con Dimensione
     fig = px.scatter(
         df_val,
         x=price_col,
         y="MPI_B",
         color='Colore_Evidenziazione',
-        size='ValueIndex',  # La dimensione dipende dal Value Index
-        size_max=25,        # Dimensione massima per rendere visibili i migliori
+        size='ValueIndex',
+        size_max=25,
         hover_name='hover_text',
         color_discrete_map={
             'Selezionato': 'red',
@@ -245,6 +241,35 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     )
     
     return fig
+
+def trova_scarpe_simili(df, target_label, metrics_cols, n_simili=3):
+    """
+    Trova le n scarpe più simili basandosi sulla distanza euclidea 
+    degli indici biomeccanici (escluso Value Index).
+    """
+    try:
+        # Ottieni i valori del target
+        target_vector = df.loc[df['label'] == target_label, metrics_cols].astype(float).values[0]
+        
+        # Calcola la distanza per tutto il dataframe
+        # Usiamo una copia per non modificare l'originale
+        df_calc = df.copy()
+        
+        # Calcolo distanza euclidea vettoriale
+        # sqrt(sum((x - y)^2))
+        vectors = df_calc[metrics_cols].astype(float).values
+        distances = np.linalg.norm(vectors - target_vector, axis=1)
+        
+        df_calc['distanza_similitudine'] = distances
+        
+        # Ordina per distanza (più basso = più simile) ed escludi se stesso (distanza 0)
+        # Filtriamo distance > 0.00001 per evitare lo stesso modello
+        simili = df_calc[df_calc['label'] != target_label].sort_values('distanza_similitudine').head(n_simili)
+        
+        return simili
+    except Exception as e:
+        st.error(f"Errore nel calcolo similitudine: {e}")
+        return pd.DataFrame()
 
 
 # =========================
@@ -378,13 +403,13 @@ with col_pesi:
     w_flex   = st.slider("Stiffness (Flex)", 1, 5, 3)
     w_weight = st.slider("Weight (Leggerezza)", 1, 5, 3)
 
-# Ricalcolo MPI dinamico
+# Ricalcolo MPI dinamico (basato sugli input del wizard)
 raw_weights = np.array([w_shock, w_energy, w_flex, w_weight], dtype=float)
 tot = raw_weights.sum() if raw_weights.sum() > 0 else 1.0
 norm_weights = raw_weights / tot
 w_shock_eff, w_energy_eff, w_flex_eff, w_weight_eff = norm_weights
 
-# Ricalcolo Shock/Energy
+# Ricalcolo Shock/Energy (basato sull'appoggio)
 def safe_minmax_series(x):
     return (x - x.min()) / max(x.max() - x.min(), 1e-12)
 
@@ -543,3 +568,33 @@ if selected_for_detail:
             val_weight = float(row['WeightIndex'])
             st.write(f"**Weight Efficiency:** {val_weight:.3f} / 1.0")
             st.progress(val_weight)
+
+# ============================================
+# 4. MODELLI SIMILI (BIOMECCANICA)
+# ============================================
+
+st.markdown("---")
+st.header("🔎 Modelli Alternativi Simili")
+st.info("Questi modelli hanno un profilo biomeccanico (Shock, Energy, Flex, Weight) molto simile a quello selezionato, indipendentemente dal prezzo.")
+
+# Calcoliamo le similarità usando gli indici calcolati dinamicamente
+cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
+df_simili = trova_scarpe_simili(df_filt, selected_for_detail, cols_simil, n_simili=3)
+
+if not df_simili.empty:
+    cols = st.columns(3)
+    for i, (idx, row_sim) in enumerate(df_simili.iterrows()):
+        with cols[i]:
+            st.markdown(f"#### {row_sim['marca']}")
+            st.write(f"**{row_sim['modello']}**")
+            
+            # Mostriamo la differenza di prezzo
+            diff_prezzo = row_sim[PRICE_COL] - row[PRICE_COL]
+            icon_prezzo = "🔴" if diff_prezzo > 0 else "🟢"
+            st.write(f"Prezzo: {row_sim[PRICE_COL]:.0f} € ({icon_prezzo} {diff_prezzo:+.0f} €)")
+            
+            st.write(f"MPI-B: **{row_sim['MPI_B']:.3f}**")
+            st.caption(f"Distanza Biomec.: {row_sim['distanza_similitudine']:.4f}")
+            
+else:
+    st.write("Nessun modello simile trovato nei filtri correnti.")
