@@ -550,26 +550,42 @@ st.info(f"Stai analizzando il modello: **{selected_for_detail if selected_for_de
 
 
 if selected_for_detail:
+    # 1. Trova i dati del modello di dettaglio
     scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
     
-    # ⚠️ FIX UX: Rimosso il nome del modello da subheader per evitare la ridondanza.
-    st.subheader(f"🔬 Dettaglio Biomeccanico")
+    st.subheader(f"🔬 Dettaglio: {selected_for_detail}")
 
     # --- INPUT CONFRONTO (Multi-select) ---
-    default_comparison = [selected_for_detail]
+    # Rimuoviamo la gestione del default dalla session_state e la forziamo a contenere il modello di dettaglio
+    # La multiselect mostrerà i valori selezionati dall'utente.
+    
+    # Seleziona il modello di dettaglio come default iniziale per il confronto
+    if 'comparison_list' not in st.session_state:
+        st.session_state['comparison_list'] = [selected_for_detail]
+    
+    # Se selected_for_detail cambia (da Step 2), resettiamo la lista di confronto per includerlo
+    if selected_for_detail not in st.session_state['comparison_list']:
+        st.session_state['comparison_list'] = [selected_for_detail]
+
+
     selezione_confronto = st.multiselect(
         "Seleziona altri modelli per il Radar Chart",
         df_filt["label"].tolist(),
         max_selections=5,
-        default=default_comparison
+        default=st.session_state['comparison_list'],
+        key='radar_multiselect'
     )
+
+    # Aggiorna la variabile di sessione con la nuova selezione dell'utente
+    st.session_state['comparison_list'] = selezione_confronto
+
 
     col_dettaglio, col_confronto_radar = st.columns([1, 2])
 
     # --- 3A. DETTAGLIO SCARPA ---
     with col_dettaglio:
         st.subheader("Informazioni Base")
-        st.markdown(f"### {scarpa['marca']} {scarpa['modello']}") # Uso markdown per il titolo all'interno
+        st.markdown(f"### {scarpa['marca']} {scarpa['modello']}")
         if "versione" in scarpa and pd.notna(scarpa["versione"]):
             st.write(f"Versione: {int(scarpa['versione'])}")
         st.write(f"Passo / categoria (AFT): {scarpa['passo']}")
@@ -591,8 +607,12 @@ if selected_for_detail:
     with col_confronto_radar:
         st.subheader("Analisi Biomeccanica (Indici 0-1)")
         
-        if selezione_confronto:
-            df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
+        # ⚠️ FIX LOGICO: Usiamo direttamente lo stato aggiornato
+        current_comparison_list = st.session_state['comparison_list']
+        
+        if current_comparison_list:
+            
+            df_comp = df_filt[df_filt["label"].isin(current_comparison_list)].copy()
             df_comp = df_comp.reset_index(drop=True) 
 
             # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
@@ -603,11 +623,19 @@ if selected_for_detail:
             
             metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
             
-            if all(m in df_comp.columns for m in metrics_plot):
+            # Verifichiamo che tutte le colonne siano presenti e che il DataFrame non sia vuoto
+            if all(m in df_comp.columns for m in metrics_plot) and not df_comp.empty:
                 
+                # Aggiungi una tabella di confronto (se ci sono più di 1 elemento)
+                if len(current_comparison_list) > 1:
+                    st.markdown("#### Tabella Comparativa")
+                    cols_table = ["label", "MPI_B", "ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+                    st.dataframe(df_comp[cols_table], use_container_width=True)
+                
+                st.markdown("#### Profilo Radar")
                 fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
                 st.pyplot(fig)
             else:
-                st.info("Dati per il Radar Chart incompleti o non numerici.")
+                st.info("Dati per il Radar Chart incompleti o non numerici (controlla i filtri).")
         else:
             st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
