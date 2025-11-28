@@ -554,22 +554,31 @@ if selected_for_detail:
         st.write(f"Cl. {int(scarpa['Cluster'])}: {scarpa['ClusterDescrizione']}")
 
     # --- 3B. RADAR CHART ---
-    with col_confronto_radar:
-        st.subheader("Analisi Biomeccanica (Indici 0-1)")
+with col_confronto_radar:
+    st.subheader("Analisi Biomeccanica (Indici 0-1)")
+    
+    if selezione_confronto:
+        df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
+
+        # Definiamo le metriche da usare nel plot (usando i nomi *_calc per Shock/Energy)
+        metrics_calc = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
         
-        if selezione_confronto:
-            df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
-
-            # Usiamo gli indici ricalcolati ShockIndex_calc e EnergyIndex_calc
-            metrics = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
+        # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
+        df_comp = df_comp.rename(columns={
+            "ShockIndex_calc": "ShockIndex",
+            "EnergyIndex_calc": "EnergyIndex"
+        })
+        
+        # Le colonne effettivamente passate al plot devono essere i nomi rinominati
+        metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+        
+        # Verifichiamo che tutte le colonne necessarie esistano (dovrebbero esistere grazie al ricalcolo)
+        if all(m in df_comp.columns for m in metrics_plot):
             
-            df_comp = df_comp.rename(columns={
-                "ShockIndex_calc": "ShockIndex",
-                "EnergyIndex_calc": "EnergyIndex"
-            })
-
-            fig = plot_radar_indices(df_comp, ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"], label_col="label")
+            fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
             st.pyplot(fig)
         else:
-            st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+            st.info("Dati per il Radar Chart incompleti o non numerici.")
+    else:
+        st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
 
