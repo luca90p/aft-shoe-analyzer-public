@@ -199,6 +199,7 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
         lambda x: 'Selezionato' if x in selected_points_labels else 'Mercato'
     )
     
+    # Ordina per portare i punti selezionati in primo piano
     df_val = df_val.sort_values(by='Colore_Evidenziazione', ascending=True).reset_index(drop=True)
     
     df_val['hover_text'] = df_val.apply(
@@ -242,7 +243,7 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     return fig
 
 def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Confronto Biomeccanico (Radar)"):
-    """ Crea un Radar Chart interattivo con Plotly. """
+    """ Crea un Radar Chart interattivo con Plotly (Stilizzato). """
     
     fig = go.Figure()
     
@@ -477,7 +478,59 @@ else:
     df_filt["ValueIndex"] = 0.0
 
 st.success("MPI Score ricalcolato!")
+
+# ============================================
+# NUOVO BLOCCO: BEST PICK PER BUDGET
+# ============================================
+
 st.markdown("---")
+st.header("💡 Best Pick: La Migliore per Te")
+
+if PRICE_COL:
+    # Determina range slider
+    min_p = int(df_filt[PRICE_COL].min())
+    max_p = int(df_filt[PRICE_COL].max())
+    
+    col_budget, col_best = st.columns([1, 2])
+    
+    with col_budget:
+        budget_max = st.slider(
+            "💰 Seleziona il tuo Budget Massimo (€):",
+            min_value=min_p, 
+            max_value=max_p, 
+            value=int(max_p * 0.8), # Default al 80% del max
+            step=5
+        )
+    
+    # Logica di filtraggio
+    df_budget = df_filt[df_filt[PRICE_COL] <= budget_max].copy()
+    
+    with col_best:
+        if not df_budget.empty:
+            # Trova la migliore per MPI tra quelle nel budget
+            best_pick = df_budget.sort_values(by="MPI_B", ascending=False).iloc[0]
+            
+            # Visualizza Card "Best Pick"
+            with st.container(border=True):
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    st.subheader(f"🏆 {best_pick['marca']} {best_pick['modello']}")
+                    st.write(f"**La scelta più performante sotto i {budget_max}€**")
+                    if pd.notna(best_pick.get('versione')):
+                        st.caption(f"Versione: {int(best_pick['versione'])}")
+
+                with c2:
+                    st.metric("MPI Score", f"{best_pick['MPI_B']:.3f}")
+                    st.write(f"Prezzo: **{best_pick[PRICE_COL]:.0f} €**")
+                    
+                    if pd.notna(best_pick.get('ValueIndex')):
+                        stars = render_stars(best_pick['ValueIndex'])
+                        st.write(f"Value: {stars}")
+        else:
+            st.warning("Nessuna scarpa trovata con questo budget. Prova ad aumentarlo!")
+
+st.markdown("---")
+
 
 # ============================================
 # 2. ANALISI MERCATO
@@ -541,7 +594,7 @@ else:
 
 
 # ============================================
-# 3. SCHEDA DETTAGLIO (con Stelle e Valori)
+# 3. SCHEDA DETTAGLIO
 # ============================================
 
 st.markdown("---")
@@ -555,7 +608,6 @@ if selected_for_detail:
     except IndexError:
         st.stop()
     
-    # UTILIZZO DI CONTAINER CON BORDO PER EVITARE IL FADE-OUT (SFUMATURA)
     with st.container(border=True):
         col_sx, col_dx = st.columns([1, 2])
         
@@ -580,23 +632,18 @@ if selected_for_detail:
             
             c1, c2 = st.columns(2)
             with c1:
-                # Shock
                 val_shock = float(row['ShockIndex_calc'])
                 st.caption(f"Shock Abs: {val_shock:.2f}")
                 st.progress(val_shock)
                 
-                # Flex
                 val_flex = float(row['FlexIndex'])
                 st.caption(f"Flexibility: {val_flex:.2f}")
                 st.progress(val_flex)
-                
             with c2:
-                # Energy
                 val_energy = float(row['EnergyIndex_calc'])
                 st.caption(f"Energy Ret: {val_energy:.2f}")
                 st.progress(val_energy)
                 
-                # Weight
                 val_weight = float(row['WeightIndex'])
                 st.caption(f"Weight Eff: {val_weight:.2f}")
                 st.progress(val_weight)
@@ -616,7 +663,6 @@ if not df_simili.empty:
     cols = st.columns(3)
     for i, (idx, row_sim) in enumerate(df_simili.iterrows()):
         with cols[i]:
-            # CONTAINER CON BORDO ANCHE QUI
             with st.container(border=True):
                 label_sim = row_sim['label']
                 st.markdown(f"**{label_sim}**")
@@ -628,7 +674,6 @@ if not df_simili.empty:
                 st.caption(f"Dist: {row_sim['distanza_similitudine']:.3f}")
     
     st.markdown("#### Confronto Radar")
-    # 2. Radar Plot
     df_radar = pd.concat([
         df_filt[df_filt['label'] == selected_for_detail],
         df_simili
