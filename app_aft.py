@@ -14,9 +14,7 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calcola gli indici biomeccanici normalizzati.
     AGGIORNAMENTO V3 (Hybrid Weight):
-    - WeightIndex: Mix ponderato tra Punteggio Globale (70%) e Relativo (30%).
-      Garantisce che una scarpa oggettivamente leggera (es. Race) batta sempre 
-      una scarpa più pesante (es. Daily), anche se quest'ultima è "ottima per la sua categoria".
+    - WeightIndex: Mix ponderato tra Punteggio Globale (75%) e Relativo (25%).
     """
 
     def safe_minmax(x: pd.Series) -> pd.Series:
@@ -56,22 +54,14 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     W = df["peso"].astype(float).to_numpy()
     
     # -- Configurazione Pesi --
-    # MIX FACTOR: Quanto conta il peso assoluto vs quello relativo?
-    # 0.70 significa che il 70% del voto dipende dai grammi effettivi (fisica),
-    # il 30% dipende da quanto è brava rispetto alla categoria.
     ALPHA_GLOBAL = 0.75 
     ALPHA_LOCAL  = 1.0 - ALPHA_GLOBAL
-    
-    # Parametro curvatura (0.5 = radice quadrata, premia i medi)
-    GAMMA = 0.5
+    GAMMA = 0.5 # Curva convessa (radice quadrata)
 
     # A) CALCOLO SCORE GLOBALE (su tutto il database)
     w_min_g = np.nanmin(W)
     w_max_g = np.nanmax(W)
     denom_g = max(w_max_g - w_min_g, 1.0)
-    
-    # Più è basso il peso, più alto il punteggio (1 - norm)
-    # Usiamo clip per sicurezza
     w_norm_g = np.clip((w_max_g - W) / denom_g, 0, 1)
     Score_Global = np.power(w_norm_g, GAMMA)
 
@@ -95,9 +85,6 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
             Score_Local[mask] = np.power(w_norm_l, GAMMA)
             
     # C) MIX FINALE
-    # Se una scarpa non ha categoria (improbabile), usiamo solo global
-    # Score_Local è inizializzato a 0, ma le maschere coprono tutto.
-    
     df["WeightIndex"] = (ALPHA_GLOBAL * Score_Global) + (ALPHA_LOCAL * Score_Local)
 
     # --- 4. StackFactor ---
@@ -128,10 +115,7 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def calcola_MPIB(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calcola l'MPI_B base. I pesi verranno poi sovrascritti dall'utente
-    nella UI, ma serve una base per il primo load.
-    """
+    """ Calcola l'MPI_B base. """
     w_shock  = 0.20
     w_energy = 0.30
     w_flex   = 0.20
@@ -149,11 +133,8 @@ def calcola_MPIB(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def esegui_clustering(df: pd.DataFrame):
-    """
-    Esegue clustering automatico (Elbow + Silhouette) usando gli indici biomeccanici.
-    """
+    """ Esegue clustering automatico (Elbow + Silhouette). """
 
-    # Helper: Livelli descrittivi
     def livello_index(val: float) -> str:
         if val < 0.33: return "Basso"
         elif val < 0.66: return "Medio"
@@ -171,14 +152,11 @@ def esegui_clustering(df: pd.DataFrame):
     rng = 42
     np.random.seed(rng)
 
-    # Usiamo i 5 indici chiave
     X = df[["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor"]].to_numpy()
     labels_cols = ["Shock", "Energy", "Flex", "Weight", "Stack"]
 
-    # Scelta K ottimale
     K_values = np.arange(2, 11)
-    SSE = []
-    silh_mean = []
+    SSE = []; silh_mean = []
 
     for k in K_values:
         kmeans = KMeans(n_clusters=k, n_init=20, random_state=rng)
@@ -186,36 +164,28 @@ def esegui_clustering(df: pd.DataFrame):
         SSE.append(kmeans.inertia_)
         silh_mean.append(np.mean(silhouette_samples(X, idx_tmp)))
 
-    SSE = np.array(SSE)
-    silh_mean = np.array(silh_mean)
+    SSE = np.array(SSE); silh_mean = np.array(silh_mean)
 
-    # Logica combinata Elbow/Silhouette
-    # Elbow (derivata seconda)
     logSSE = np.log(SSE)
-    # Gestione array piccoli per gradient
     if len(logSSE) > 2:
         d2 = np.gradient(np.gradient(logSSE))
         k_elbow = K_values[np.argmin(d2)]
-    else:
-        k_elbow = 3
+    else: k_elbow = 3
 
     k_silh = K_values[np.argmax(silh_mean)]
 
     k_elbow = max(2, min(int(k_elbow), int(K_values.max())))
     k_silh  = max(2, min(int(k_silh),  int(K_values.max())))
     
-    # Mix: 70% silhouette, 30% elbow
     k_opt = int(round(0.7 * k_silh + 0.3 * k_elbow))
-    k_opt = max(2, min(k_opt, 7)) # Limitiamo a max 7 cluster per leggibilità
+    k_opt = max(2, min(k_opt, 7))
 
-    # Clustering Finale
     kmeans_final = KMeans(n_clusters=k_opt, n_init=50, random_state=rng)
     idx = kmeans_final.fit_predict(X)
     C = kmeans_final.cluster_centers_
 
     df["Cluster"] = idx + 1
 
-    # Summary
     cluster_summary = pd.DataFrame(C, columns=labels_cols)
     cluster_summary["Cluster"] = np.arange(1, k_opt + 1)
     cluster_summary["Descrizione"] = cluster_summary.apply(descrizione_cluster_simplificata, axis=1)
@@ -250,6 +220,74 @@ def plot_radar_indices(df_comp, metrics, label_col="label"):
     ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
     return fig
 
+# ============================================
+# UTILITY: SCATTER PLOT MPI vs PREZZO (GLOBALE + CONFRONTO)
+# ============================================
+
+def plot_mpi_vs_price(df_val, df_comp_labels, price_col):
+    """
+    Scatter plot MPI-B vs Prezzo su tutto il database filtrato (df_val), 
+    evidenziando i modelli selezionati (df_comp_labels).
+    """
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # 1. Plot di tutte le scarpe filtrate (sfondo)
+    ax.scatter(
+        df_val[price_col],
+        df_val["MPI_B"],
+        color='gray',
+        alpha=0.4,
+        s=30,
+        label="Tutte le scarpe filtrate"
+    )
+
+    # 2. Evidenziazione dei modelli in confronto
+    df_comp = df_val[df_val['label'].isin(df_comp_labels)].copy()
+    
+    if not df_comp.empty:
+        # Plot dei punti evidenziati
+        ax.scatter(
+            df_comp[price_col],
+            df_comp["MPI_B"],
+            color='red',
+            edgecolors='black',
+            linewidths=1.5,
+            alpha=0.8,
+            s=120, # Punti più grandi e marcati
+            label="Modelli selezionati"
+        )
+        
+        # 3. Aggiunta delle etichette dettagliate ai punti evidenziati
+        for i, row in df_comp.iterrows():
+            
+            # Testo dettagliato per l'annotazione
+            text_label = (
+                f"{row['label']}\n"
+                f"MPI: {row['MPI_B']:.3f}\n"
+                f"Costo: {row[price_col]:.0f}€\n"
+                f"Value: {row['ValueIndex']:.3f}"
+            )
+            
+            ax.annotate(
+                text_label,
+                (row[price_col], row["MPI_B"]),
+                textcoords="offset points",
+                xytext=(10, 5),
+                ha='left',
+                fontsize=8,
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7, ec="none")
+            )
+
+    ax.set_title("MPI-B Score vs. Prezzo (Performance vs. Costo)")
+    ax.set_xlabel(f"{price_col} (€)")
+    ax.set_ylabel("MPI-B Score")
+    ax.set_ylim(0, 1.05)
+    ax.legend(loc='lower right')
+    ax.grid(True, linestyle='--', alpha=0.6)
+    
+    return fig
+
 
 # =========================
 #   APP STREAMLIT
@@ -266,9 +304,7 @@ with st.expander("ℹ️ Dettagli sugli Indici (Aggiornato V2)"):
 **1. ShockIndex:** Ammortizzazione (40% Tallone, 60% Avampiede).  
 **2. EnergyIndex:** Ritorno energia (modulato dallo stack).  
 **3. FlexIndex:** Rigidità ottimale basata sul passo (Race vs Tempo vs Daily).  
-**4. WeightIndex (NUOVO):** - Confronta la scarpa **solo con la sua categoria** (Race con Race, Daily con Daily).
-   - Usa una curva "convessa" ($\gamma=0.5$): le scarpe di peso medio non vengono penalizzate troppo. Solo quelle molto pesanti (per la loro categoria) ricevono voti bassi.
-   - Premia al massimo solo la più leggera in assoluto della categoria.
+**4. WeightIndex (NUOVO):** Metrica ibrida (75% peso assoluto / 25% peso relativo alla categoria).
 **5. StackFactor:** Penalità/Bonus stabilità in base all'altezza.
     """)
 
@@ -343,9 +379,6 @@ st.sidebar.info(
 # =========================
 #   RICALCOLO LIVE (MPI)
 # =========================
-# Nota: WeightIndex e FlexIndex sono statici (o meglio, calcolati intelligentemente in load_and_process),
-# mentre Shock e Energy dipendono dallo slider tallone/avampiede.
-
 def safe_minmax_series(x):
     return (x - x.min()) / max(x.max() - x.min(), 1e-12)
 
@@ -371,12 +404,9 @@ df["MPI_B"] = (
 
 # Value Index
 if PRICE_COL:
-    # Calcoliamo Value Index (MPI / Prezzo)
-    # Filtriamo prezzi nulli o zero per evitare crash
-    valid_p = (df[PRICE_COL] > 10) # almeno 10 euro
+    valid_p = (df[PRICE_COL] > 10)
     vals = df.loc[valid_p, "MPI_B"] / df.loc[valid_p, PRICE_COL]
     
-    # Normalizziamo 0-1
     if not vals.empty:
         v_min, v_max = vals.min(), vals.max()
         df.loc[valid_p, "ValueIndex"] = ((vals - v_min) / (v_max - v_min)).round(3)
@@ -427,80 +457,8 @@ st.dataframe(
     use_container_width=True
 )
 
-
-
 # ============================================
-# UTILITY: SCATTER PLOT MPI vs PREZZO (GLOBALE + CONFRONTO)
-# ============================================
-
-def plot_mpi_vs_price(df_val, df_comp_labels, price_col):
-    """
-    Scatter plot MPI-B vs Prezzo su tutto il database filtrato (df_val), 
-    evidenziando i modelli selezionati (df_comp_labels).
-    """
-    
-    # Prepara il grafico
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    # 1. Plot di tutte le scarpe filtrate (sfondo)
-    ax.scatter(
-        df_val[price_col],
-        df_val["MPI_B"],
-        color='gray',
-        alpha=0.4,
-        s=30,
-        label="Tutte le scarpe filtrate"
-    )
-
-    # 2. Evidenziazione dei modelli in confronto
-    df_comp = df_val[df_val['label'].isin(df_comp_labels)].copy()
-    
-    if not df_comp.empty:
-        # Plot dei punti evidenziati
-        ax.scatter(
-            df_comp[price_col],
-            df_comp["MPI_B"],
-            color='red',
-            edgecolors='black',
-            linewidths=1.5,
-            alpha=0.8,
-            s=120, # Punti più grandi e marcati
-            label="Modelli selezionati"
-        )
-        
-        # 3. Aggiunta delle etichette dettagliate ai punti evidenziati
-        for i, row in df_comp.iterrows():
-            
-            # Testo dettagliato per l'annotazione
-            text_label = (
-                f"{row['label']}\n"
-                f"MPI: {row['MPI_B']:.3f}\n"
-                f"Costo: {row[price_col]:.0f}€\n"
-                f"Value: {row['ValueIndex']:.3f}"
-            )
-            
-            ax.annotate(
-                text_label,
-                (row[price_col], row["MPI_B"]),
-                textcoords="offset points",
-                xytext=(10, 5),  # Sposta l'etichetta a destra e leggermente in alto
-                ha='left',
-                fontsize=8,
-                bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7, ec="none") # Sfondo per leggibilità
-            )
-
-    ax.set_title("MPI-B Score vs. Prezzo (Performance vs. Costo)")
-    ax.set_xlabel(f"{price_col} (€)")
-    ax.set_ylabel("MPI-B Score")
-    ax.set_ylim(0, 1.05)
-    ax.legend(loc='lower right')
-    ax.grid(True, linestyle='--', alpha=0.6)
-    
-    return fig
-
-
-# ============================================
-#   ANALISI E CONFRONTO (RIORGANIZZATO)
+# ANALISI E CONFRONTO (RIORGANIZZATO)
 # ============================================
 
 # Selezioni da usare in entrambi i grafici (Dettaglio -> Confronto)
@@ -512,22 +470,12 @@ if not df_filt.empty:
         index=0 
     )
 
-# --- BLOCCO DETTAGLIO (usa selected_for_detail) ---
+# --- BLOCCO DETTAGLIO (RESTITUITO) ---
 st.subheader("Dettaglio scarpa")
 
 if selected_for_detail:
     scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
-    # ... [MANTIENI QUI TUTTO IL TUO CODICE DI VISUALIZZAZIONE COL1, COL2, COL3] ...
-    # ... (omesso per brevità nella risposta, ma devi lasciarlo) ...
-
-    # --- BLOCCO DETTAGLIO (usa selected_for_detail) ---
-st.subheader("Dettaglio scarpa")
-
-if selected_for_detail:
-    scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
-    
-    # Inizializzo 'scelta' per il multiselect del confronto
-    scelta = selected_for_detail
+    scelta = selected_for_detail # Variabile usata per pre-selezionare nel confronto
 
     col1, col2, col3 = st.columns(3)
 
@@ -538,7 +486,6 @@ if selected_for_detail:
         st.write(f"Passo / categoria (AFT): {scarpa['passo']}")
         st.write(f"Peso: {scarpa['peso']} g")
 
-        # Prezzo (se presente nel dataframe)
         if PRICE_COL is not None and pd.notna(scarpa[PRICE_COL]):
             st.write(f"Prezzo: {scarpa[PRICE_COL]:.0f} €")
 
@@ -558,25 +505,14 @@ if selected_for_detail:
         st.write("**Performance & cluster**")
         st.metric("MPI-B", f"{scarpa['MPI_B']:.3f}")
 
-        # Value Index normalizzato 0–1 (qualità/prezzo)
         if "ValueIndex" in scarpa.index and pd.notna(scarpa["ValueIndex"]):
             st.write(f"Value index (0–1): {scarpa['ValueIndex']:.3f}")
 
-        # Nome cluster
         st.write(f"Cluster: {int(scarpa['Cluster'])}")
 
-        # Descrizione estesa del cluster
         if "ClusterDescrizione" in scarpa.index:
             st.write(scarpa["ClusterDescrizione"])
-
-else:
-    st.info("Nessuna scarpa corrisponde ai filtri selezionati.")
-    scelta = None
-# --- FINE BLOCCO DETTAGLIO ---
     
-    # Riporto qui solo il codice per popolare 'scelta' per il multiselect
-    scelta = selected_for_detail
-
 else:
     st.info("Nessuna scarpa corrisponde ai filtri selezionati.")
     scelta = None
@@ -636,7 +572,3 @@ if selezione_confronto:
         st.pyplot(fig)
     else:
         st.info("Indici per il radar non disponibili.")
-
-
-
-
