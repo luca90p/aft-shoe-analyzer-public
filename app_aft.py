@@ -195,15 +195,15 @@ def esegui_clustering(df: pd.DataFrame):
 def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     """ 
     Grafico Radar Matplotlib.
-    FIX: Forza la conversione float per prevenire ValueError in Matplotlib.
+    FIX: Estrae esplicitamente il valore scalare (float) per prevenire il ValueError.
     """
     import numpy as np
     
-    # --- FIX: Forza la conversione a float in-place per il plotting ---
+    # --- FIX: Forza la colonna a float nel DataFrame di confronto ---
     for m in metrics:
         if m in df_comp.columns:
-            # Usiamo .loc per evitare SettingWithCopyWarning
-            df_comp.loc[:, m] = df_comp[m].astype(float) 
+            # Assicuriamo che la colonna sia float
+            df_comp.loc[:, m] = df_comp[m].astype(float)
     # ------------------------------------------------------------------
     
     n_metrics = len(metrics)
@@ -215,7 +215,8 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     ax.set_theta_direction(-1)
 
     for _, row in df_comp.iterrows():
-        values = [row[m] for m in metrics]
+        # Utilizziamo .item() per garantire che il valore sia estratto come scalare Python.
+        values = [row[m].item() for m in metrics]
         values = values + [values[0]]
         label = row[label_col]
         ax.plot(angles, values, linewidth=2, label=label)
@@ -226,7 +227,6 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     ax.grid(True)
     ax.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1))
     return fig
-
 
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     """ Scatter plot MPI-B vs Prezzo usando Plotly per l'interattività (hover e click). """
@@ -603,3 +603,4 @@ if selected_for_detail:
                 st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
             st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+
