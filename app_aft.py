@@ -599,33 +599,33 @@ if selected_for_detail:
         st.write(f"Cl. {int(scarpa['Cluster'])}: {scarpa['ClusterDescrizione']}")
 
     # --- 3B. RADAR CHART (Visualizzazione) ---
-    with col_confronto_radar:
-        st.subheader("Analisi Biomeccanica (Indici 0-1)")
+with col_confronto_radar:
+    st.subheader("Analisi Biomeccanica (Indici 0-1)")
+    
+    # ⚠️ FIX LOGICO: Controlliamo se la lista selezionata ha almeno un elemento
+    if selezione_confronto:
         
-        # ⚠️ FIX LOGICO: Controlliamo se la lista selezionata ha almeno un elemento
-        if selezione_confronto:
-            
-            df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
-            df_comp = df_comp.reset_index(drop=True) 
+        df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
+        df_comp = df_comp.reset_index(drop=True) 
 
-            # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
-            df_comp = df_comp.rename(columns={
-                "ShockIndex_calc": "ShockIndex",
-                "EnergyIndex_calc": "EnergyIndex"
-            })
+        # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
+        df_comp = df_comp.rename(columns={
+            "ShockIndex_calc": "ShockIndex",
+            "EnergyIndex_calc": "EnergyIndex"
+        })
+        
+        metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+        
+        # Verifichiamo che tutte le colonne siano presenti e che il DataFrame non sia vuoto
+        if all(m in df_comp.columns for m in metrics_plot) and not df_comp.empty:
             
-            metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-            
-            # Verifichiamo che tutte le colonne siano presenti prima di plottare
-            if all(m in df_comp.columns for m in metrics_plot) and not df_comp.empty:
-                
-                fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
-                st.pyplot(fig)
-            else:
-                st.info("Dati per il Radar Chart incompleti o non numerici.")
+            fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
+            st.pyplot(fig)
         else:
-            st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
-                st.info("Dati per il Radar Chart incompleti o non numerici.")
-        else:
-            st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+            # Caso: Selezione presente, ma i dati filtrati sono incompleti o non numerici
+            st.info("Dati per il Radar Chart incompleti o non numerici.")
+    else:
+        # Caso: La lista di selezione è vuota
+        st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+
 
