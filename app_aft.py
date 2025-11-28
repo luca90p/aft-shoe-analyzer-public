@@ -458,7 +458,7 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         
         fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
         
-       # Utilizzo dell'API standard di Streamlit per catturare la selezione al click
+        # Utilizzo dell'API standard di Streamlit per catturare la selezione al click
         st.plotly_chart(
             fig_scatter, 
             use_container_width=True, 
@@ -466,12 +466,12 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
             key='mpi_scatter_chart' # La chiave per recuperare i dati in session_state
         )
 
-        # CATTURA DELL'EVENTO DI SELEZIONE TRAMITE SESSION_STATE
+        # CATTURA DELL'EVENTO DI SELEZIONE TRAMITE SESSION_STATE (Gestione robusta)
         
         # Recupera lo stato di selezione assegnato automaticamente da Streamlit
         selection_data_state = st.session_state.get('mpi_scatter_chart')
 
-        # Analizza se sono stati selezionati punti
+        # Analizza i dati solo se la chiave è presente e contiene una selezione
         if selection_data_state and selection_data_state.get('selection'):
             selection_points = selection_data_state['selection'].get('points')
             
@@ -498,7 +498,6 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
 else:
     st.warning("Colonna prezzo non disponibile nel dataset per l'analisi. Impossibile procedere.")
     st.stop()
-
 
 # ============================================
 # 3. ANALISI DI DETTAGLIO E CONFRONTO
@@ -581,4 +580,5 @@ with col_confronto_radar:
             st.info("Dati per il Radar Chart incompleti o non numerici.")
     else:
         st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+
 
