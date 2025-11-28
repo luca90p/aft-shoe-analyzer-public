@@ -494,28 +494,73 @@ if not df_filt.empty:
     initial_selection = [scelta] if 'scelta' in locals() and scelta in df_filt["label"].tolist() else []
 
     selezione_confronto = st.multiselect(
-        "Seleziona fino a 3 scarpe da confrontare",
+        "Seleziona fino a 5 scarpe da confrontare (Aumentato il limite per il grafico)",
         df_filt["label"].tolist(),
-        max_selections=3,
-        default=initial_selection # <--- QUESTA È LA CHIAVE DELLA MODIFICA
+        max_selections=5, # Aumento il limite per permettere un confronto più utile
+        default=initial_selection
     )
 
     if selezione_confronto:
         df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
 
-        # Tabella comparativa
-        colonne_confronto = [
-            "label", "marca", "modello", "versione", "passo",
-            "MPI_B", "Cluster",
-            "ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor",
-            "peso", "drop", "altezza_tallone", "altezza_mesopiede"
-        ]
-        colonne_confronto = [c for c in colonne_confronto if c in df_comp.columns]
+        # Tabella comparativa (omitted for brevity, keep the original)
+        # ... [CODICE TABELLA COMPARATIVA] ...
 
-        st.write("Tabella comparativa (MPI + indici)")
-        st.dataframe(df_comp[colonne_confronto], use_container_width=True)
+        # --- GRAFICO BUBBLE (MPI-B vs Prezzo vs Value Index) ---
+        if PRICE_COL and "ValueIndex" in df_comp.columns:
+            df_val_cmp = df_comp.dropna(subset=[PRICE_COL, "MPI_B", "ValueIndex"]).copy()
 
-        # Grafico Radar
+            if not df_val_cmp.empty:
+                st.write("### Analisi Qualità/Prezzo/Performance (Bubble Chart)")
+
+                # Normalizzazione per la dimensione delle bolle (ValueIndex 0-1)
+                # La dimensione della bolla è proporzionale a (ValueIndex)^2 per renderla più visibile
+                bubble_size = 200 + 1000 * np.power(df_val_cmp["ValueIndex"], 2)
+
+                fig_bubble, ax_bubble = plt.subplots(figsize=(10, 6))
+
+                # Scatter/Bubble Chart
+                scatter = ax_bubble.scatter(
+                    df_val_cmp[PRICE_COL],
+                    df_val_cmp["MPI_B"],
+                    s=bubble_size,
+                    alpha=0.6,
+                    edgecolors="w",
+                    linewidth=1
+                )
+
+                # Aggiungi etichette alle bolle
+                for i, row in df_val_cmp.iterrows():
+                    # Usa solo le prime due parole del nome per evitare sovrapposizioni
+                    label_short = " ".join(row["label"].split()[:2])
+                    ax_bubble.annotate(
+                        label_short,
+                        (row[PRICE_COL], row["MPI_B"]),
+                        textcoords="offset points",
+                        xytext=(0, 5),
+                        ha='center',
+                        fontsize=8
+                    )
+
+                ax_bubble.set_title("MPI-B vs Prezzo (Dimensione bolla = Value Index)")
+                ax_bubble.set_xlabel(f"{PRICE_COL} (€)")
+                ax_bubble.set_ylabel("MPI-B Score (Performance)")
+                ax_bubble.grid(True, linestyle='--', alpha=0.6)
+                
+                # Aggiungi una nota sulla dimensione della bolla
+                fig_bubble.text(0.95, 0.01, 'Bolla grande = alto Value Index (MPI/Costo)', 
+                                horizontalalignment='right', fontsize=9, color='gray')
+
+
+                st.pyplot(fig_bubble)
+            else:
+                st.info("Dati insufficienti (mancano Prezzo, MPI o Value Index) per il Bubble Chart.")
+        else:
+            st.warning("Colonna Prezzo o ValueIndex non disponibile per il confronto.")
+
+        st.write("---") # Separatore
+
+        # --- GRAFICO RADAR SUI 4 INDICI (come prima) ---
         metrics = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
         metrics = [m for m in metrics if m in df_comp.columns]
 
@@ -529,4 +574,5 @@ if not df_filt.empty:
         st.info("Seleziona almeno una scarpa per il confronto.")
 else:
     st.info("Servono scarpe nei filtri attuali per fare un confronto.")
+
 
