@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt 
 import plotly.express as px
+import plotly.graph_objects as go
 
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
@@ -210,6 +211,7 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     for _, row in df_comp.iterrows():
         # --- CORREZIONE: Esegui il casting a float scalarmente ---
         try:
+            # Assicurati che le colonne siano di tipo float
             values = [float(row[m]) for m in metrics]
         except (ValueError, TypeError) as e:
             # Se ci sono dati non numerici, salta questa riga
@@ -230,7 +232,7 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
 
 
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
-    """ Scatter plot MPI-B vs Prezzo usando Plotly per l'interattività (hover e click). """
+    """ Scatter plot MPI-B vs Prezzo usando Plotly per l'interattività (solo hover). """
     
     # Crea la colonna per l'evidenziazione
     df_val['Colore_Evidenziazione'] = df_val['label'].apply(
@@ -276,8 +278,6 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
         yaxis=dict(range=[0, 1.05]),
         legend_title_text='Punti Dati'
     )
-    
-    # Rimosso l'annotazione di click per semplificare l'UX e farla dipendere dalla selectbox
     
     return fig
 
@@ -465,7 +465,7 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         
         selected_label = st.session_state['selected_point_key']
         
-        # 2B. SELEZIONE UNIFICATA (Selectbox e Grafico)
+        # 2B. SELEZIONE UNIFICATA (Selectbox)
         st.write("### 📊 Posizionamento MPI vs Prezzo")
         
         # Trova l'indice del modello corrente per preimpostare correttamente la selectbox
@@ -476,26 +476,24 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         else:
             selected_index = 0
             st.session_state['selected_point_key'] = model_list[0] 
-            selected_label = model_list[0] # Aggiorna la variabile locale per il plot
+            selected_label = model_list[0] 
 
         selected_label_input = st.selectbox(
             "Seleziona un modello per il Dettaglio e l'Evidenziazione:",
             model_list,
-            index=selected_index, # Usa l'indice trovato
+            index=selected_index,
             key='main_selectbox'
         )
         
         # Aggiorna lo stato se l'utente cambia la selectbox
         if selected_label_input != st.session_state['selected_point_key']:
              st.session_state['selected_point_key'] = selected_label_input
-             # Non serve st.rerun se non catturiamo il click dal grafico, ma aggiorniamo subito
-             # Se usiamo la key='main_selectbox', Streamlit aggiorna automaticamente la session_state
+             st.rerun() # Ricarica per aggiornare Step 3
 
         selected_points_labels = [st.session_state['selected_point_key']]
         
+        # Mostriamo il grafico Plotly (solo evidenziazione e hover)
         fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
-        
-        # Mostriamo il grafico Plotly (senza cattura eventi mouse/click)
         st.plotly_chart(fig_scatter, use_container_width=True)
 
         # 2C. CLASSIFICA VALUE INDEX
@@ -527,25 +525,23 @@ st.info(f"Stai analizzando il modello: **{selected_for_detail if selected_for_de
 if selected_for_detail:
     scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
     
-    # Rimosso il nome del modello da subheader per evitare la ridondanza.
     st.subheader(f"🔬 Dettaglio Biomeccanico")
 
     # --- INPUT CONFRONTO (Multi-select) ---
-    # Inizializziamo il default del confronto per includere sempre il modello di dettaglio
+    
+    # Inizializziamo il default del confronto: deve contenere sempre il modello di dettaglio
     default_comparison = [selected_for_detail]
     
     # Usiamo una lista di sessione separata per memorizzare le selezioni del radar, 
-    # garantendo che il modello di dettaglio sia sempre il primo elemento se non vuoto.
     if 'radar_comparison' not in st.session_state:
         st.session_state['radar_comparison'] = default_comparison
     
-    # Se il modello di dettaglio è cambiato (da Step 2), resettiamo la lista di confronto per includerlo.
-    if selected_for_detail not in st.session_state['radar_comparison']:
+    # Se il modello di dettaglio è cambiato, o se la lista è vuota, la resettiamo per includerlo.
+    if selected_for_detail not in st.session_state['radar_comparison'] or not st.session_state['radar_comparison']:
         st.session_state['radar_comparison'] = default_comparison
 
-
     selezione_confronto = st.multiselect(
-        "Seleziona modelli da comparare nel Radar Chart",
+        "Seleziona modelli da comparare nel Radar Chart (max 5)",
         df_filt["label"].tolist(),
         max_selections=5,
         default=st.session_state['radar_comparison'],
@@ -580,54 +576,35 @@ if selected_for_detail:
         st.write(f"Cl. {int(scarpa['Cluster'])}: {scarpa['ClusterDescrizione']}")
 
     # --- 3B. RADAR CHART ---
-with col_confronto_radar:
-    st.subheader("Analisi Biomeccanica (Indici 0-1)")
-    
-    # ⚠️ Verifichiamo la lista di confronto
-    if selezione_confronto:
-        df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
-        df_comp = df_comp.reset_index(drop=True) 
+    with col_confronto_radar:
+        st.subheader("Analisi Biomeccanica (Indici 0-1)")
+        
+        if selezione_confronto:
+            df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
+            df_comp = df_comp.reset_index(drop=True) 
 
-        # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO
-        df_comp = df_comp.rename(columns={
-            "ShockIndex_calc": "ShockIndex",
-            "EnergyIndex_calc": "EnergyIndex"
-        })
-        
-        metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-        
-        # Colonne numeriche da pulire per la tabella
-        cols_to_clean = ["MPI_B", "ValueIndex"] + metrics_plot
-        
-        # --- FIX DEFINITIVO: Pulizia Esplicita del Tipo su tutte le Colonne Target ---
-        try:
-            # Applichiamo la conversione to_numeric (errors='coerce') su un subset di colonne.
-            # Questo garantisce che ogni colonna riceva una Series pulita di float.
-            for col in cols_to_clean:
-                if col in df_comp.columns:
-                    df_comp[col] = pd.to_numeric(df_comp[col], errors='coerce').astype(float).round(3)
-        except Exception as e:
-            # Se la pulizia fallisce (es. se i dati originali sono irrecuperabili), 
-            # mostriamo l'errore senza fermare l'app in modo brusco.
-            st.error(f"Errore di pulizia dei dati: Controlla la consistenza del CSV. Dettaglio: {e}")
-            st.stop()
-        # ---------------------------------------------------------------------------
-
-        if all(m in df_comp.columns for m in metrics_plot) and not df_comp.empty:
+            # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
+            df_comp = df_comp.rename(columns={
+                "ShockIndex_calc": "ShockIndex",
+                "EnergyIndex_calc": "EnergyIndex"
+            })
             
-            # Aggiungi una tabella di confronto (se ci sono più di 1 elemento)
-            if len(selezione_confronto) > 1:
-                st.markdown("#### Tabella Comparativa")
-                cols_table = ["label", "MPI_B", "ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-                cols_table = [c for c in cols_table if c in df_comp.columns]
+            metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+            
+            if all(m in df_comp.columns for m in metrics_plot) and not df_comp.empty:
                 
-                # df_comp[cols_table] ora è garantito essere float/object (label)
-                st.dataframe(df_comp[cols_table], use_container_width=True)
-            
-            st.markdown("#### Profilo Radar")
-            fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
-            st.pyplot(fig)
+                # Aggiungi una tabella di confronto (se ci sono più di 1 elemento)
+                if len(selezione_confronto) > 1:
+                    st.markdown("#### Tabella Comparativa")
+                    cols_table = ["label", "MPI_B", "ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+                    cols_table = [c for c in cols_table if c in df_comp.columns]
+                    
+                    st.dataframe(df_comp[cols_table], use_container_width=True)
+                
+                st.markdown("#### Profilo Radar")
+                fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
+                st.pyplot(fig)
+            else:
+                st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
-            st.info("Dati per il Radar Chart incompleti o non numerici.")
-    else:
-        st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+            st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
