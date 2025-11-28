@@ -1,9 +1,8 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt # Mantenuto per il Radar Plot
 import plotly.express as px
-import plotly.graph_objects as go
 
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
@@ -196,14 +195,13 @@ def esegui_clustering(df: pd.DataFrame):
 def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     """ 
     Grafico Radar Matplotlib.
-    NOTA: Il casting a float viene eseguito qui per garantire la compatibilità con Matplotlib.
+    FIX: Forza la conversione float per prevenire ValueError in Matplotlib.
     """
     import numpy as np
     
     # --- FIX: Forza la conversione a float in-place per il plotting ---
     for m in metrics:
         if m in df_comp.columns:
-            # Assicuriamo che la colonna sia float, risolvendo problemi di sequenze in celle
             df_comp[m] = df_comp[m].astype(float) 
     # ------------------------------------------------------------------
     
@@ -250,7 +248,7 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
         x=price_col,
         y="MPI_B",
         color='Colore_Evidenziazione',
-        hover_name='hover_text', 
+        hover_name='hover_text', # Usiamo il testo personalizzato nell'hover
         color_discrete_map={
             'Selezionato': 'red',
             'Mercato': 'gray'
@@ -515,7 +513,7 @@ else:
 
 st.header("Step 3: Analisi di Dettaglio e Confronto")
 
-selected_for_detail = st.session_state['selected_point_key']
+selected_for_detail = st.session_state.get('selected_point_key')
 
 # Se la selezione è vuota, usa il primo elemento della classifica Value Index come default
 if not selected_for_detail and not df_val_sorted.empty:
@@ -525,7 +523,7 @@ st.info(f"Stai analizzando il modello: **{selected_for_detail if selected_for_de
 
 
 if selected_for_detail:
-    # Usiamo .iloc[0] perché è garantito che la riga esista
+    # Usiamo .iloc[0] perché è garantito che la riga esista (poiché viene dalla classifica filtrata)
     scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
     
     st.subheader(f"🔬 Dettaglio: {selected_for_detail}")
@@ -569,7 +567,6 @@ if selected_for_detail:
         
         if selezione_confronto:
             df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
-            # FIX: Puliamo l'indice per evitare ambiguità nell'assegnazione
             df_comp = df_comp.reset_index(drop=True) 
 
             # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per il plot
@@ -582,7 +579,6 @@ if selected_for_detail:
             
             if all(m in df_comp.columns for m in metrics_plot):
                 
-                # La funzione plot_radar_indices ora gestisce il cast a float internamente
                 fig = plot_radar_indices(df_comp, metrics_plot, label_col="label")
                 st.pyplot(fig)
             else:
