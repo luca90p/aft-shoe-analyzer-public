@@ -457,34 +457,49 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
     if not df_val.empty:
         
         # Inizializzazione Session State per la selezione
-        if 'selected_point' not in st.session_state:
-            st.session_state['selected_point'] = None
+        if 'selected_point_key' not in st.session_state:
+            st.session_state['selected_point_key'] = None
         
-        # Estraiamo l'etichetta selezionata
-        selected_label = st.session_state['selected_point'] if st.session_state['selected_point'] else None
+        selected_label = st.session_state['selected_point_key'] if st.session_state['selected_point_key'] else None
         
         # 2A. SCATTER PLOT INTERATTIVO (Plotly)
         st.write("### 📊 Posizionamento MPI vs Prezzo")
         st.info("Passa il mouse sui punti per i dettagli. Clicca su un punto per selezionarlo per l'analisi dettagliata (Step 3).")
         
-        # Il set di etichette da evidenziare è solo quello selezionato per il dettaglio
         selected_points_labels = [selected_label] if selected_label else []
         
         fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
         
-        # Usa Streamlit Plotly Event handler per catturare il click
-        plotly_event = st.plotly_chart(fig_scatter, use_container_width=True, on_select="plotly_selected_point")
+        # UTILIZZO L'API STANDARD DI STREAMLIT PER CATTURARE LA SELEZIONE
+        # Uso 'selection_mode="single"' per forzare la selezione di un solo punto alla volta.
+        # Assegno una 'key' per identificare il componente.
+        
+        plotly_event = st.plotly_chart(
+            fig_scatter, 
+            use_container_width=True, 
+            selection_mode="single", # Permette solo la selezione di un punto
+            key='mpi_scatter_chart'
+        )
 
-        # CATTURA DELL'EVENTO DI SELEZIONE
-        if plotly_event and plotly_event.get('points'):
-            # Il label della scarpa si trova in customdata[0]
-            new_selection = plotly_event['points'][0]['customdata'][0]
-            if new_selection != st.session_state['selected_point']:
-                st.session_state['selected_point'] = new_selection
-                # Ricarica la pagina per far avanzare l'utente allo step successivo
-                st.rerun()
+        # CATTURA DELL'EVENTO DI SELEZIONE DAL VALORE DI RITORNO
+        # st.plotly_chart ritorna None o un dictionary con i dati del punto selezionato
+        
+        if plotly_event and plotly_event.get('selection'):
+            selection_data = plotly_event['selection']
+            
+            # Verifico se ci sono punti selezionati e customdata
+            if selection_data.get('points') and selection_data['points'][0].get('customdata'):
+                # Il label della scarpa è in customdata[0]
+                new_selection = selection_data['points'][0]['customdata'][0]
+                
+                # Aggiorno lo stato se la selezione è cambiata
+                if new_selection != st.session_state['selected_point_key']:
+                    st.session_state['selected_point_key'] = new_selection
+                    # Ricarica la pagina per aggiornare lo Step 3
+                    st.rerun()
 
         # 2B. CLASSIFICA VALUE INDEX
+        # ... (Resto del codice di Step 2) ...
         st.write("### 🏆 Classifica Qualità/Prezzo (MPI-B / Costo)")
         df_val_sorted = df_val.sort_values(by="ValueIndex", ascending=False)
         cols_show = ["label", "passo", "MPI_B", PRICE_COL, "ValueIndex"]
@@ -494,23 +509,24 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         
     else:
         st.info("Nessuna scarpa con prezzo e MPI-B validi nei filtri attuali per l'analisi.")
-        st.stop() # Blocca il resto se non ci sono dati validi
+        st.stop()
 else:
     st.warning("Colonna prezzo non disponibile nel dataset per l'analisi. Impossibile procedere.")
     st.stop()
 
 
 # ============================================
-# 3. ANALISI DI DETTAGLIO E CONFRONTO
+# 3. ANALISI DI DETTAGLIO E CONFRONTO (MODIFICHE MINIME)
 # ============================================
 
-st.header("Step 3: Analisi di Dettaglio e Confronto")
-
-selected_for_detail = st.session_state['selected_point']
+# Qui usiamo la chiave di sessione aggiornata
+selected_for_detail = st.session_state['selected_point_key']
 
 # Se la selezione è vuota (primo load), usiamo il primo elemento della classifica Value Index
 if not selected_for_detail and not df_val_sorted.empty:
     selected_for_detail = df_val_sorted.iloc[0]['label']
+    
+# ... (il resto del codice di Step 3 rimane invariato)
 
 
 if selected_for_detail:
@@ -577,3 +593,4 @@ if selected_for_detail:
 
 else:
     st.info("Per favore, clicca su un punto nel grafico MPI vs Prezzo (Step 2) per iniziare l'analisi dettagliata.")
+
