@@ -199,8 +199,11 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
         lambda x: 'Selezionato' if x in selected_points_labels else 'Mercato'
     )
     
-    # Ordina per portare i punti selezionati in primo piano nel grafico
-    df_val = df_val.sort_values(by='Colore_Evidenziazione', ascending=False).reset_index(drop=True)
+    # 1. Ordinamento Z-Order:
+    # Vogliamo che 'Mercato' venga disegnato PRIMA e 'Selezionato' DOPO (sopra).
+    # 'Mercato' viene prima di 'Selezionato' in ordine alfabetico.
+    # Quindi ascending=True mette prima Mercato (sotto) e poi Selezionato (sopra).
+    df_val = df_val.sort_values(by='Colore_Evidenziazione', ascending=True).reset_index(drop=True)
     
     df_val['hover_text'] = df_val.apply(
         lambda row: f"<b>{row['label']}</b><br>"
@@ -209,11 +212,14 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
                     f"Value Index: {row['ValueIndex']:.3f}", axis=1
     )
 
+    # 2. Configurazione Grafico con Dimensione
     fig = px.scatter(
         df_val,
         x=price_col,
         y="MPI_B",
         color='Colore_Evidenziazione',
+        size='ValueIndex',  # La dimensione dipende dal Value Index
+        size_max=25,        # Dimensione massima per rendere visibili i migliori
         hover_name='hover_text',
         color_discrete_map={
             'Selezionato': 'red',
@@ -221,12 +227,11 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
         },
         custom_data=['label'],
         labels={price_col: f'{price_col} (€)', "MPI_B": "MPI-B Score"},
-        title="MPI-B Score vs. Prezzo (Performance vs. Costo)"
+        title="MPI-B Score vs. Prezzo (Dimensione = Value Index)"
     )
 
     fig.update_traces(
         marker=dict(
-            size=12,
             opacity=0.7,
             line=dict(width=1, color='black')
         ),
@@ -252,9 +257,7 @@ def render_stars(value):
     """
     if pd.isna(value):
         return ""
-    # Scala da 0-1 a 0-5 e arrotonda
     score = int(round(value * 5))
-    # Clampa tra 0 e 5 per sicurezza
     score = max(0, min(5, score))
     
     full_star = "★"
@@ -375,13 +378,13 @@ with col_pesi:
     w_flex   = st.slider("Stiffness (Flex)", 1, 5, 3)
     w_weight = st.slider("Weight (Leggerezza)", 1, 5, 3)
 
-# Ricalcolo MPI dinamico (basato sugli input del wizard)
+# Ricalcolo MPI dinamico
 raw_weights = np.array([w_shock, w_energy, w_flex, w_weight], dtype=float)
 tot = raw_weights.sum() if raw_weights.sum() > 0 else 1.0
 norm_weights = raw_weights / tot
 w_shock_eff, w_energy_eff, w_flex_eff, w_weight_eff = norm_weights
 
-# Ricalcolo Shock/Energy (basato sull'appoggio)
+# Ricalcolo Shock/Energy
 def safe_minmax_series(x):
     return (x - x.min()) / max(x.max() - x.min(), 1e-12)
 
@@ -440,15 +443,14 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         if 'selected_point_key' not in st.session_state:
             st.session_state['selected_point_key'] = default_label_on_load
         
-        # FIX: Se il modello precedentemente selezionato non è nel nuovo filtro, resettiamo il default.
+        # FIX: Controllo consistenza selezione post-filtro
         current_model_list = df_val_sorted['label'].tolist()
-        
         if st.session_state['selected_point_key'] not in current_model_list:
              st.session_state['selected_point_key'] = current_model_list[0]
         
         selected_label = st.session_state['selected_point_key']
         
-        # 2B. SELEZIONE UNIFICATA (Selectbox e Grafico)
+        # 2B. SELEZIONE UNIFICATA (Selectbox)
         st.write("### 📊 Posizionamento MPI vs Prezzo")
         
         selected_index = current_model_list.index(selected_label)
@@ -460,14 +462,14 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
             key='main_selectbox'
         )
         
-        # Aggiorna lo stato se l'utente cambia la selectbox
+        # Aggiornamento stato
         if selected_label_input != st.session_state['selected_point_key']:
              st.session_state['selected_point_key'] = selected_label_input
              st.rerun() 
 
         selected_points_labels = [st.session_state['selected_point_key']]
         
-        # Mostriamo il grafico Plotly (solo evidenziazione e hover)
+        # Mostriamo il grafico Plotly
         fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
         st.plotly_chart(fig_scatter, use_container_width=True)
 
@@ -485,7 +487,7 @@ else:
 
 
 # ============================================
-# 3. SCHEDA DETTAGLIO (con Stelle)
+# 3. SCHEDA DETTAGLIO (con Stelle e Valori)
 # ============================================
 
 st.markdown("---")
@@ -501,7 +503,6 @@ if selected_for_detail:
         st.warning("Il modello selezionato non è presente nei filtri correnti.")
         st.stop()
     
-    # Container visuale per la "Card"
     with st.container():
         col_sx, col_dx = st.columns([1, 2])
         
@@ -517,7 +518,8 @@ if selected_for_detail:
             if pd.notna(row.get('ValueIndex')):
                 val_idx = float(row['ValueIndex'])
                 stars = render_stars(val_idx)
-                st.markdown(f"**Value Index:** {val_idx:.3f} &nbsp; {stars}")
+                st.write("**Value Index:**")
+                st.markdown(f"### {val_idx:.3f} {stars}")
 
         with col_dx:
             st.write("#### Caratteristiche Biomeccaniche")
@@ -526,7 +528,6 @@ if selected_for_detail:
             
             st.markdown("---")
             
-            # Visualizzazione con VALORI ESPLICITI nel testo
             val_shock = float(row['ShockIndex_calc'])
             st.write(f"**Shock Absorption:** {val_shock:.3f} / 1.0")
             st.progress(val_shock)
