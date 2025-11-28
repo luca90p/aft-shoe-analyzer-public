@@ -519,6 +519,60 @@ if selected_for_detail:
     scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
     # ... [MANTIENI QUI TUTTO IL TUO CODICE DI VISUALIZZAZIONE COL1, COL2, COL3] ...
     # ... (omesso per brevità nella risposta, ma devi lasciarlo) ...
+
+    # --- BLOCCO DETTAGLIO (usa selected_for_detail) ---
+st.subheader("Dettaglio scarpa")
+
+if selected_for_detail:
+    scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
+    
+    # Inizializzo 'scelta' per il multiselect del confronto
+    scelta = selected_for_detail
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown(f"### {scarpa['marca']} {scarpa['modello']}")
+        if "versione" in scarpa and pd.notna(scarpa["versione"]):
+            st.write(f"Versione: {int(scarpa['versione'])}")
+        st.write(f"Passo / categoria (AFT): {scarpa['passo']}")
+        st.write(f"Peso: {scarpa['peso']} g")
+
+        # Prezzo (se presente nel dataframe)
+        if PRICE_COL is not None and pd.notna(scarpa[PRICE_COL]):
+            st.write(f"Prezzo: {scarpa[PRICE_COL]:.0f} €")
+
+        st.write(f"Drop: {scarpa['drop']} mm")
+        st.write(f"Stack (tallone): {scarpa['altezza_tallone']} mm")
+
+    with col2:
+        st.write("**Indici biomeccanici**")
+        # Uso st.progress per una visualizzazione immediata
+        st.progress(float(scarpa['ShockIndex']), text=f"ShockIndex: {scarpa['ShockIndex']:.3f}")
+        st.progress(float(scarpa['EnergyIndex']), text=f"EnergyIndex: {scarpa['EnergyIndex']:.3f}")
+        st.progress(float(scarpa['FlexIndex']), text=f"FlexIndex: {scarpa['FlexIndex']:.3f}")
+        st.progress(float(scarpa['WeightIndex']), text=f"WeightIndex: {scarpa['WeightIndex']:.3f}")
+        st.write(f"StackFactor: {scarpa['StackFactor']:.3f}")
+
+    with col3:
+        st.write("**Performance & cluster**")
+        st.metric("MPI-B", f"{scarpa['MPI_B']:.3f}")
+
+        # Value Index normalizzato 0–1 (qualità/prezzo)
+        if "ValueIndex" in scarpa.index and pd.notna(scarpa["ValueIndex"]):
+            st.write(f"Value index (0–1): {scarpa['ValueIndex']:.3f}")
+
+        # Nome cluster
+        st.write(f"Cluster: {int(scarpa['Cluster'])}")
+
+        # Descrizione estesa del cluster
+        if "ClusterDescrizione" in scarpa.index:
+            st.write(scarpa["ClusterDescrizione"])
+
+else:
+    st.info("Nessuna scarpa corrisponde ai filtri selezionati.")
+    scelta = None
+# --- FINE BLOCCO DETTAGLIO ---
     
     # Riporto qui solo il codice per popolare 'scelta' per il multiselect
     scelta = selected_for_detail
@@ -582,6 +636,7 @@ if selezione_confronto:
         st.pyplot(fig)
     else:
         st.info("Indici per il radar non disponibili.")
+
 
 
 
