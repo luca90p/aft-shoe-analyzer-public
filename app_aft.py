@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
@@ -194,12 +195,10 @@ def esegui_clustering(df: pd.DataFrame):
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     """ Scatter plot MPI-B vs Prezzo usando Plotly (solo hover). """
     
-    # Crea la colonna per l'evidenziazione
     df_val['Colore_Evidenziazione'] = df_val['label'].apply(
         lambda x: 'Selezionato' if x in selected_points_labels else 'Mercato'
     )
     
-    # Ordina per portare i punti selezionati in primo piano nel grafico
     df_val = df_val.sort_values(by='Colore_Evidenziazione', ascending=True).reset_index(drop=True)
     
     df_val['hover_text'] = df_val.apply(
@@ -242,16 +241,55 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     
     return fig
 
+def plot_radar_comparison_plotly(df_shoes, metrics, title="Confronto Biomeccanico (Radar)"):
+    """ Crea un Radar Chart interattivo con Plotly per confrontare le scarpe. """
+    
+    fig = go.Figure()
+    
+    # Mapping per nomi leggibili nel grafico
+    metrics_readable = {
+        "ShockIndex_calc": "Shock",
+        "EnergyIndex_calc": "Energy",
+        "FlexIndex": "Flex",
+        "WeightIndex": "Weight"
+    }
+    
+    categories = [metrics_readable.get(m, m) for m in metrics]
+    
+    for i, row in df_shoes.iterrows():
+        values = [float(row[m]) for m in metrics]
+        # Chiudi il poligono ripetendo il primo valore
+        values += [values[0]]
+        categories_closed = categories + [categories[0]]
+        
+        fig.add_trace(go.Scatterpolar(
+            r=values,
+            theta=categories_closed,
+            fill='toself',
+            name=row['label']
+        ))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 1]
+            )
+        ),
+        title=title,
+        showlegend=True
+    )
+    
+    return fig
+
 def trova_scarpe_simili(df, target_label, metrics_cols, n_simili=3):
     """
-    Trova le n scarpe più simili basandosi sulla distanza euclidea 
-    degli indici biomeccanici (escluso Value Index).
+    Trova le n scarpe più simili basandosi sulla distanza euclidea.
     """
     try:
         target_vector = df.loc[df['label'] == target_label, metrics_cols].astype(float).values[0]
         df_calc = df.copy()
         
-        # Calcolo distanza euclidea vettoriale
         vectors = df_calc[metrics_cols].astype(float).values
         distances = np.linalg.norm(vectors - target_vector, axis=1)
         
@@ -265,22 +303,11 @@ def trova_scarpe_simili(df, target_label, metrics_cols, n_simili=3):
         st.error(f"Errore nel calcolo similitudine: {e}")
         return pd.DataFrame()
 
-
-# =========================
-#   HELPER DI VISUALIZZAZIONE
-# =========================
 def render_stars(value):
-    """
-    Converte un valore 0-1 in una stringa di 5 stelle.
-    Es: 0.8 -> ★★★★☆
-    """
-    if pd.isna(value):
-        return ""
+    if pd.isna(value): return ""
     score = int(round(value * 5))
     score = max(0, min(5, score))
-    full_star = "★"
-    empty_star = "☆"
-    return (full_star * score) + (empty_star * (5 - score))
+    return ("★" * score) + ("☆" * (5 - score))
 
 
 # =========================
@@ -294,7 +321,7 @@ st.title("AFT Shoe Database – MPI & Clustering V2")
 file_name = "database_completo_AFT_20251124_clean.csv"
 
 # =========================
-#   PRE-PROCESSING (Cached)
+#   PRE-PROCESSING
 # =========================
 
 @st.cache_data
@@ -302,7 +329,7 @@ def load_and_process(path):
     try:
         df = pd.read_csv(path)
     except FileNotFoundError:
-        st.error(f"File {path} non trovato. Assicurati che sia nella stessa cartella.")
+        st.error(f"File {path} non trovato.")
         return pd.DataFrame(), pd.DataFrame()
 
     df = calcola_indici(df)
@@ -340,7 +367,7 @@ PRICE_COLS = [c for c in df.columns if "prezzo" in c.lower()]
 PRICE_COL = PRICE_COLS[0] if PRICE_COLS else None
 
 # =========================
-#   SIDEBAR: INFO E FILTRI BASE
+#   SIDEBAR
 # =========================
 
 with st.sidebar:
@@ -350,7 +377,6 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # FILTRI BASE
     all_brands = ["Tutte"] + sorted(df["marca"].unique())
     sel_brand = st.selectbox("Marca", all_brands)
 
@@ -372,30 +398,21 @@ st.info("Regola i parametri qui sotto per calcolare l'MPI Score in base alle **t
 
 col_appoggio, col_pesi = st.columns(2)
 
-# --- Appoggio ---
 with col_appoggio:
-    st.subheader("1A. Appoggio Piede (Shock/Energy Index)")
-    heel_pct = st.slider(
-        "Percentuale appoggio di tallone (%)",
-        min_value=0,
-        max_value=100,
-        value=40,
-        step=5
-    )
+    st.subheader("1A. Appoggio Piede")
+    heel_pct = st.slider("Appoggio tallone (%)", 0, 100, 40, 5)
     w_heel = heel_pct / 100.0
     w_mid = 1.0 - w_heel
     st.write(f"Avampiede: {100 - heel_pct}%")
 
-# --- Importanza Indici ---
 with col_pesi:
-    st.subheader("1B. Importanza dei Parametri (MPI Score)")
-    st.markdown("Peso da 1 (Basso) a 5 (Alto)")
+    st.subheader("1B. Importanza Parametri")
     w_shock  = st.slider("Shock (Ammortizz.)", 1, 5, 3)
     w_energy = st.slider("Energy (Ritorno)", 1, 5, 3)
     w_flex   = st.slider("Stiffness (Flex)", 1, 5, 3)
     w_weight = st.slider("Weight (Leggerezza)", 1, 5, 3)
 
-# Ricalcolo MPI dinamico
+# Ricalcolo MPI
 raw_weights = np.array([w_shock, w_energy, w_flex, w_weight], dtype=float)
 tot = raw_weights.sum() if raw_weights.sum() > 0 else 1.0
 norm_weights = raw_weights / tot
@@ -415,7 +432,6 @@ df_filt.loc[:, "EnergyIndex_calc"] = (w_heel * ER_h   + w_mid * ER_m)
 df_filt["ShockIndex_calc"] = safe_minmax_series(df_filt["ShockIndex_calc"])
 df_filt["EnergyIndex_calc"] = safe_minmax_series(df_filt["EnergyIndex_calc"])
 
-# Calcolo MPI Finale
 df_filt.loc[:, "MPI_B"] = (
     w_shock_eff  * df_filt["ShockIndex_calc"] +
     w_energy_eff * df_filt["EnergyIndex_calc"] +
@@ -423,11 +439,9 @@ df_filt.loc[:, "MPI_B"] = (
     df_filt["WeightIndex"] * w_weight_eff
 ).round(3)
 
-# Ricalcolo Value Index
 if PRICE_COL:
     valid_p = (df_filt[PRICE_COL] > 10)
     vals = df_filt.loc[valid_p, "MPI_B"] / df_filt.loc[valid_p, PRICE_COL]
-    
     if not vals.empty:
         v_min, v_max = vals.min(), vals.max()
         df_filt.loc[valid_p, "ValueIndex"] = ((vals - v_min) / (v_max - v_min)).round(3)
@@ -436,11 +450,11 @@ if PRICE_COL:
 else:
     df_filt["ValueIndex"] = 0.0
 
-st.success("MPI Score ricalcolato in base ai tuoi criteri!")
+st.success("MPI Score ricalcolato!")
 st.markdown("---")
 
 # ============================================
-# 2. RISULTATI GLOBALI INTERATTIVI
+# 2. ANALISI MERCATO
 # ============================================
 
 st.header("Step 2: Analisi di Mercato (MPI vs Prezzo)")
@@ -452,72 +466,69 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
     
     if not df_val.empty:
         
-        # 2A. INIZIALIZZAZIONE E ORDINAMENTO
+        # Gestione Stato
         df_val_sorted = df_val.sort_values(by="ValueIndex", ascending=False)
         default_label_on_load = df_val_sorted.iloc[0]['label']
         
-        # Inizializzazione Session State
         if 'selected_point_key' not in st.session_state:
             st.session_state['selected_point_key'] = default_label_on_load
         
-        # FIX: Controllo consistenza selezione post-filtro
+        # Verifica consistenza
         current_model_list = df_val_sorted['label'].tolist()
         if st.session_state['selected_point_key'] not in current_model_list:
              st.session_state['selected_point_key'] = current_model_list[0]
         
         selected_label = st.session_state['selected_point_key']
-        
-        # 2B. SELEZIONE UNIFICATA (Selectbox)
-        st.write("### 📊 Posizionamento MPI vs Prezzo")
-        
         selected_index = current_model_list.index(selected_label)
 
-        selected_label_input = st.selectbox(
-            "🔎 **Trova ed evidenzia un modello nel grafico e nella scheda dettagli:**",
-            current_model_list,
-            index=selected_index,
-            key='main_selectbox'
-        )
-        
-        # Aggiornamento stato
-        if selected_label_input != st.session_state['selected_point_key']:
-             st.session_state['selected_point_key'] = selected_label_input
-             st.rerun() 
+        col_plot, col_list = st.columns([3, 1])
 
-        selected_points_labels = [st.session_state['selected_point_key']]
-        
-        # Mostriamo il grafico Plotly
-        fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        with col_plot:
+            st.write("### 📊 Grafico Interattivo")
+            # Selectbox principale
+            selected_label_input = st.selectbox(
+                "🔎 Trova ed evidenzia modello:",
+                current_model_list,
+                index=selected_index,
+                key='main_selectbox'
+            )
+            
+            if selected_label_input != st.session_state['selected_point_key']:
+                 st.session_state['selected_point_key'] = selected_label_input
+                 st.rerun() 
 
-        # 2C. CLASSIFICA VALUE INDEX
-        st.write("### 🏆 Classifica Qualità/Prezzo (MPI-B / Costo)")
-        cols_show = ["label", "passo", "MPI_B", PRICE_COL, "ValueIndex"]
-        st.dataframe(df_val_sorted[[c for c in cols_show if c in df_val_sorted.columns]], use_container_width=True)
+            selected_points_labels = [st.session_state['selected_point_key']]
+            fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
+            st.plotly_chart(fig_scatter, use_container_width=True)
+
+        with col_list:
+            st.write("### 🏆 Top 10 Value")
+            st.dataframe(
+                df_val_sorted[["label", "MPI_B", "ValueIndex"]].head(10), 
+                use_container_width=True,
+                hide_index=True
+            )
         
     else:
-        st.info("Nessuna scarpa con prezzo e MPI-B validi nei filtri attuali per l'analisi.")
+        st.info("Nessun dato valido per il grafico.")
         st.stop()
 else:
-    st.warning("Colonna prezzo non disponibile nel dataset per l'analisi. Impossibile procedere.")
     st.stop()
 
 
 # ============================================
-# 3. SCHEDA DETTAGLIO (con Stelle e Valori)
+# 3. SCHEDA DETTAGLIO
 # ============================================
 
 st.markdown("---")
-st.header("Step 3: Scheda Dettaglio Modello Selezionato")
+st.header("Step 3: Scheda Dettaglio")
 
 selected_for_detail = st.session_state['selected_point_key']
 
 if selected_for_detail:
-    # Estraiamo i dati per la card
     try:
         row = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
     except IndexError:
-        st.warning("Il modello selezionato non è presente nei filtri correnti.")
         st.stop()
     
     with st.container():
@@ -530,7 +541,7 @@ if selected_for_detail:
                 st.caption(f"Versione: {int(row['versione'])}")
             
             st.metric("MPI-B Score", f"{row['MPI_B']:.3f}")
-            st.metric("Prezzo", f"{row[PRICE_COL]:.0f} €" if PRICE_COL else "N/A")
+            st.metric("Prezzo", f"{row[PRICE_COL]:.0f} €")
             
             if pd.notna(row.get('ValueIndex')):
                 val_idx = float(row['ValueIndex'])
@@ -539,60 +550,55 @@ if selected_for_detail:
                 st.markdown(f"### {val_idx:.3f} {stars}")
 
         with col_dx:
-            st.write("#### Caratteristiche Biomeccaniche")
-            st.write(f"**Categoria:** {row['passo']} | **Peso:** {row['peso']}g")
-            st.write(f"**Cluster:** {int(row['Cluster'])} – {row['ClusterDescrizione']}")
+            st.write("#### Biomeccanica")
+            st.write(f"**Cat:** {row['passo']} | **Peso:** {row['peso']}g")
             
-            st.markdown("---")
-            
-            val_shock = float(row['ShockIndex_calc'])
-            st.write(f"**Shock Absorption:** {val_shock:.3f} / 1.0")
-            st.progress(val_shock)
-            
-            val_energy = float(row['EnergyIndex_calc'])
-            st.write(f"**Energy Return:** {val_energy:.3f} / 1.0")
-            st.progress(val_energy)
-            
-            val_flex = float(row['FlexIndex'])
-            st.write(f"**Flexibility (Score):** {val_flex:.3f} / 1.0")
-            st.progress(val_flex)
-            
-            val_weight = float(row['WeightIndex'])
-            st.write(f"**Weight Efficiency:** {val_weight:.3f} / 1.0")
-            st.progress(val_weight)
+            c1, c2 = st.columns(2)
+            with c1:
+                st.caption("Shock Absorption")
+                st.progress(float(row['ShockIndex_calc']))
+                st.caption("Flexibility")
+                st.progress(float(row['FlexIndex']))
+            with c2:
+                st.caption("Energy Return")
+                st.progress(float(row['EnergyIndex_calc']))
+                st.caption("Weight Efficiency")
+                st.progress(float(row['WeightIndex']))
 
 # ============================================
-# 4. MODELLI SIMILI (BIOMECCANICA)
+# 4. MODELLI SIMILI & RADAR
 # ============================================
 
 st.markdown("---")
-st.header("🔎 Modelli Alternativi Simili")
-st.info("Questi modelli hanno un profilo biomeccanico (Shock, Energy, Flex, Weight) molto simile a quello selezionato, indipendentemente dal prezzo.")
+st.header("🔎 Modelli Simili (Biomeccanica)")
 
-# Calcoliamo le similarità usando gli indici calcolati dinamicamente
 cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
 df_simili = trova_scarpe_simili(df_filt, selected_for_detail, cols_simil, n_simili=3)
 
 if not df_simili.empty:
+    # 1. Mostra le card dei modelli simili
     cols = st.columns(3)
     for i, (idx, row_sim) in enumerate(df_simili.iterrows()):
         with cols[i]:
-            st.markdown(f"#### {row_sim['marca']}")
+            label_sim = row_sim['label'] # Include marca modello versione
+            st.markdown(f"**{label_sim}**")
             
-            # FIX VERSIONE: Mostriamo modello + versione in modo chiaro
-            nome_modello = f"{row_sim['modello']}"
-            if pd.notna(row_sim.get('versione')):
-                nome_modello += f" v{int(row_sim['versione'])}"
-            
-            st.write(f"**{nome_modello}**")
-            
-            # Mostriamo la differenza di prezzo
             diff_prezzo = row_sim[PRICE_COL] - row[PRICE_COL]
-            icon_prezzo = "🔴" if diff_prezzo > 0 else "🟢"
-            st.write(f"Prezzo: {row_sim[PRICE_COL]:.0f} € ({icon_prezzo} {diff_prezzo:+.0f} €)")
-            
-            st.write(f"MPI-B: **{row_sim['MPI_B']:.3f}**")
-            st.caption(f"Distanza Biomec.: {row_sim['distanza_similitudine']:.4f}")
+            icon = "🔴" if diff_prezzo > 0 else "🟢"
+            st.write(f"{row_sim[PRICE_COL]:.0f}€ ({icon} {diff_prezzo:+.0f}€)")
+            st.caption(f"MPI: {row_sim['MPI_B']:.3f}")
+    
+    st.markdown("#### Confronto Radar")
+    # 2. Prepara i dati per il Radar Plot (Originale + Simili)
+    # Creiamo un DF con la scarpa selezionata + le simili
+    df_radar = pd.concat([
+        df_filt[df_filt['label'] == selected_for_detail],
+        df_simili
+    ], ignore_index=True)
+    
+    # Plotly Radar Chart
+    fig_radar = plot_radar_comparison_plotly(df_radar, cols_simil)
+    st.plotly_chart(fig_radar, use_container_width=True)
             
 else:
     st.write("Nessun modello simile trovato nei filtri correnti.")
