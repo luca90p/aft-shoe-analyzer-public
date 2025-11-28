@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
-# Rimosso matplotlib.pyplot in quanto il radar non viene più usato
 import plotly.express as px
 
 from sklearn.cluster import KMeans
@@ -193,7 +192,7 @@ def esegui_clustering(df: pd.DataFrame):
 
 
 def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
-    """ Scatter plot MPI-B vs Prezzo usando Plotly (solo hover, senza click). """
+    """ Scatter plot MPI-B vs Prezzo usando Plotly (solo hover). """
     
     # Crea la colonna per l'evidenziazione
     df_val['Colore_Evidenziazione'] = df_val['label'].apply(
@@ -215,7 +214,7 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
         x=price_col,
         y="MPI_B",
         color='Colore_Evidenziazione',
-        hover_name='hover_text', # Usiamo il testo personalizzato nell'hover
+        hover_name='hover_text',
         color_discrete_map={
             'Selezionato': 'red',
             'Mercato': 'gray'
@@ -227,7 +226,7 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
 
     fig.update_traces(
         marker=dict(
-            size=10,
+            size=12,
             opacity=0.7,
             line=dict(width=1, color='black')
         ),
@@ -237,7 +236,7 @@ def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
     fig.update_layout(
         hovermode="closest",
         yaxis=dict(range=[0, 1.05]),
-        legend_title_text='Punti Dati'
+        legend_title_text='Legenda'
     )
     
     return fig
@@ -400,7 +399,7 @@ st.success("MPI Score ricalcolato in base ai tuoi criteri!")
 st.markdown("---")
 
 # ============================================
-# 2. RISULTATI GLOBALI INTERATTIVI (Grafico e Classifica)
+# 2. RISULTATI GLOBALI INTERATTIVI
 # ============================================
 
 st.header("Step 2: Analisi di Mercato (MPI vs Prezzo)")
@@ -426,7 +425,7 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         
         selected_label = st.session_state['selected_point_key']
         
-        # 2B. SELEZIONE UNIFICATA (Selectbox)
+        # 2B. SELEZIONE UNIFICATA (Selectbox e Grafico)
         st.write("### 📊 Posizionamento MPI vs Prezzo")
         
         # Trova l'indice del modello corrente per preimpostare correttamente la selectbox
@@ -437,10 +436,10 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         else:
             selected_index = 0
             st.session_state['selected_point_key'] = model_list[0] 
-            selected_label = model_list[0] 
+            selected_label = model_list[0]
 
         selected_label_input = st.selectbox(
-            "Seleziona un modello per il Dettaglio e l'Evidenziazione:",
+            "🔎 **Trova ed evidenzia un modello nel grafico:**",
             model_list,
             index=selected_index,
             key='main_selectbox'
@@ -449,7 +448,7 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         # Aggiorna lo stato se l'utente cambia la selectbox
         if selected_label_input != st.session_state['selected_point_key']:
              st.session_state['selected_point_key'] = selected_label_input
-             st.rerun() # Forza il rerun se la selectbox cambia
+             st.rerun() 
 
         selected_points_labels = [st.session_state['selected_point_key']]
         
@@ -461,8 +460,6 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         st.write("### 🏆 Classifica Qualità/Prezzo (MPI-B / Costo)")
         cols_show = ["label", "passo", "MPI_B", PRICE_COL, "ValueIndex"]
         st.dataframe(df_val_sorted[[c for c in cols_show if c in df_val_sorted.columns]], use_container_width=True)
-
-        st.markdown("---")
         
     else:
         st.info("Nessuna scarpa con prezzo e MPI-B validi nei filtri attuali per l'analisi.")
@@ -470,118 +467,3 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
 else:
     st.warning("Colonna prezzo non disponibile nel dataset per l'analisi. Impossibile procedere.")
     st.stop()
-
-
-# ============================================
-# 3. ANALISI DI DETTAGLIO E CONFRONTO
-# ============================================
-
-st.header("Step 3: Analisi di Dettaglio e Confronto")
-
-selected_for_detail = st.session_state['selected_point_key']
-    
-st.info(f"Stai analizzando il modello: **{selected_for_detail if selected_for_detail else 'Nessun modello selezionato'}**")
-
-
-if selected_for_detail:
-    scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
-    
-    st.subheader(f"🔬 Dettaglio Biomeccanico")
-
-    # --- INPUT CONFRONTO (Multi-select) ---
-    
-    # Inizializziamo il default del confronto: deve contenere sempre il modello di dettaglio
-    default_comparison = [selected_for_detail]
-    
-    # Usiamo una lista di sessione separata per memorizzare le selezioni del radar, 
-    if 'radar_comparison' not in st.session_state:
-        st.session_state['radar_comparison'] = default_comparison
-    
-    # Se il modello di dettaglio è cambiato, o se la lista è vuota, la resettiamo per includerlo.
-    if selected_for_detail not in st.session_state['radar_comparison'] or not st.session_state['radar_comparison']:
-        st.session_state['radar_comparison'] = default_comparison
-
-    selezione_confronto = st.multiselect(
-        "Seleziona modelli da comparare nella Tabella (max 5)",
-        df_filt["label"].tolist(),
-        max_selections=5,
-        default=st.session_state['radar_comparison'],
-        key='radar_multiselect'
-    )
-    
-    # Aggiorna lo stato di sessione con la selezione corrente
-    st.session_state['radar_comparison'] = selezione_confronto
-
-
-    col_dettaglio, col_confronto_radar = st.columns([1, 2])
-
-    # --- 3A. DETTAGLIO SCARPA ---
-    with col_dettaglio:
-        st.subheader("Informazioni Base")
-        st.markdown(f"### {scarpa['marca']} {scarpa['modello']}")
-        if "versione" in scarpa and pd.notna(scarpa["versione"]):
-            st.write(f"Versione: {int(scarpa['versione'])}")
-        st.write(f"Passo / categoria (AFT): {scarpa['passo']}")
-        st.write(f"Peso: {scarpa['peso']} g")
-
-        if PRICE_COL is not None and pd.notna(scarpa[PRICE_COL]):
-            st.write(f"Prezzo: {scarpa[PRICE_COL]:.0f} €")
-        
-        st.markdown("---")
-        st.metric("MPI-B Score", f"{scarpa['MPI_B']:.3f}")
-        if "ValueIndex" in scarpa.index and pd.notna(scarpa["ValueIndex"]):
-            st.write(f"Value index (0–1): {scarpa['ValueIndex']:.3f}")
-        
-        st.markdown("---")
-        st.write("**Cluster:**")
-        st.write(f"Cl. {int(scarpa['Cluster'])}: {scarpa['ClusterDescrizione']}")
-
-    # --- 3B. TABELLA DI CONFRONTO FINALE ---
-    with col_confronto_radar:
-        st.subheader("Tabella di Confronto Biomeccanico")
-        
-        if selezione_confronto:
-            df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
-            df_comp = df_comp.reset_index(drop=True) 
-
-            # Rinominiamo le colonne calcolate nel DataFrame TEMPORANEO per la tabella
-            df_comp = df_comp.rename(columns={
-                "ShockIndex_calc": "ShockIndex",
-                "EnergyIndex_calc": "EnergyIndex"
-            })
-            
-            # Colonne numeriche da pulire per la tabella
-            metrics_plot = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-            cols_to_clean = ["MPI_B", "ValueIndex"] + metrics_plot
-            
-            # --- FIX: CICLO DI PULIZIA 1D (per risolvere TypeError) ---
-            try:
-                for col in cols_to_clean:
-                    if col in df_comp.columns:
-                        # 1. Isola la Series (lettura sicura 1D)
-                        series_to_convert = df_comp[col]
-                        
-                        # 2. Converte la Series e assegna il risultato (scrittura sicura)
-                        df_comp.loc[:, col] = pd.to_numeric(
-                            series_to_convert, 
-                            errors='coerce'
-                        ).astype(float)
-            except Exception as e:
-                # Se la pulizia fallisce (es. dati corrotti nel CSV), visualizziamo l'errore
-                st.error(f"Errore di pulizia dati: Il contesto del DataFrame è instabile. Dettaglio: {e}")
-                # Non usiamo st.stop() qui per non bloccare l'app se il problema è isolato
-            # ---------------------------------------------------------------------------
-
-
-            if not df_comp.empty:
-                
-                # df_display è una copia per la visualizzazione con arrotondamento
-                df_display = df_comp[[c for c in ["label", "MPI_B", PRICE_COL, "ValueIndex"] + metrics_plot if c in df_comp.columns]].copy()
-                df_display.iloc[:, 1:] = df_display.iloc[:, 1:].round(3) 
-
-                st.dataframe(df_display, use_container_width=True)
-            else:
-                st.info("Nessun dato disponibile per i modelli selezionati (controlla i filtri).")
-        else:
-            st.warning("Seleziona almeno un modello per visualizzare il confronto.")
-
