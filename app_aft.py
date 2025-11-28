@@ -455,38 +455,42 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
     
     if not df_val.empty:
         
-        # 2A. INIZIALIZZAZIONE SELEZIONE (Primo modello più performante/economico)
+        # 2A. INIZIALIZZAZIONE E ORDINAMENTO
         df_val_sorted = df_val.sort_values(by="ValueIndex", ascending=False)
-        default_label = df_val_sorted.iloc[0]['label']
+        default_label_on_load = df_val_sorted.iloc[0]['label']
         
-        # Inizializzazione Session State per la selezione (solo se non è mai stata selezionata)
+        # Inizializzazione Session State
         if 'selected_point_key' not in st.session_state:
-            st.session_state['selected_point_key'] = default_label
+            st.session_state['selected_point_key'] = default_label_on_load
+        
+        # ⚠️ FIX: Se il modello precedentemente selezionato non è nel nuovo filtro, resettiamo il default.
+        if st.session_state['selected_point_key'] not in df_val_sorted['label'].tolist():
+             st.session_state['selected_point_key'] = default_label_on_load
         
         selected_label = st.session_state['selected_point_key']
         
-        # 2B. SCATTER PLOT INTERATTIVO (Plotly)
+        # 2B. SELEZIONE UNIFICATA (Selectbox e Grafico)
         st.write("### 📊 Posizionamento MPI vs Prezzo")
         
-        # Selectbox (Metodo di controllo stabile)
+        # Trova l'indice del modello corrente per preimpostare correttamente la selectbox
+        selected_index = df_val_sorted['label'].tolist().index(selected_label)
+
         selected_label_input = st.selectbox(
             "Seleziona un modello per il Dettaglio (o clicca sul grafico per cambiarlo):",
             df_val_sorted['label'].tolist(),
-            index=df_val_sorted['label'].tolist().index(selected_label)
+            index=selected_index # Usa l'indice trovato
         )
         
         # Aggiorna lo stato se l'utente cambia la selectbox
         if selected_label_input != st.session_state['selected_point_key']:
              st.session_state['selected_point_key'] = selected_label_input
-             st.rerun() # Ricarica per aggiornare Step 3
+             st.rerun() 
 
         selected_points_labels = [st.session_state['selected_point_key']]
         
         fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
         
         # Utilizzo dell'API standard di Streamlit per catturare la selezione al click
-        # NOTA: Il risultato della selezione al click è ora gestito implicitamente
-        # tramite la chiave 'mpi_scatter_chart' in st.session_state.
         st.plotly_chart(
             fig_scatter, 
             use_container_width=True, 
@@ -494,10 +498,9 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
             key='mpi_scatter_chart' 
         )
 
-        # CATTURA DELL'EVENTO DI SELEZIONE DAL MOUSE (Post-Plot)
+        # CATTURA DELL'EVENTO DI SELEZIONE TRAMITE SESSION_STATE
         selection_data_state = st.session_state.get('mpi_scatter_chart')
         
-        # Questo blocco ora gestisce l'aggiornamento solo se il grafico Plotly ha restituito un click
         if selection_data_state and selection_data_state.get('selection'):
             selection_points = selection_data_state['selection'].get('points')
             
@@ -596,3 +599,4 @@ if selected_for_detail:
                 st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
             st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+
