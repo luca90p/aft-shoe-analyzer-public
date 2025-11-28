@@ -483,96 +483,158 @@ else:
     st.info("Nessuna scarpa corrisponde ai filtri selezionati.")
 
 
-# =========================
-#   CONFRONTO SCARPE
-# =========================
+# ============================================
+# UTILITY: SCATTER PLOT MPI vs PREZZO (GLOBALE + CONFRONTO)
+# ============================================
 
-st.subheader("Confronto scarpe")
+def plot_mpi_vs_price(df_val, df_comp_labels, price_col):
+    """
+    Scatter plot MPI-B vs Prezzo su tutto il database filtrato (df_val), 
+    evidenziando i modelli selezionati (df_comp_labels).
+    """
+    
+    # Prepara il grafico
+    fig, ax = plt.subplots(figsize=(10, 6))
 
-if not df_filt.empty:
-    # Imposta la scarpa selezionata in "Dettaglio" come pre-selezionata nel confronto.
-    initial_selection = [scelta] if 'scelta' in locals() and scelta in df_filt["label"].tolist() else []
-
-    selezione_confronto = st.multiselect(
-        "Seleziona fino a 5 scarpe da confrontare (Aumentato il limite per il grafico)",
-        df_filt["label"].tolist(),
-        max_selections=5, # Aumento il limite per permettere un confronto più utile
-        default=initial_selection
+    # 1. Plot di tutte le scarpe filtrate (sfondo)
+    ax.scatter(
+        df_val[price_col],
+        df_val["MPI_B"],
+        color='gray',
+        alpha=0.4,
+        s=30,
+        label="Tutte le scarpe filtrate"
     )
 
-    if selezione_confronto:
-        df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
+    # 2. Evidenziazione dei modelli in confronto
+    df_comp = df_val[df_val['label'].isin(df_comp_labels)].copy()
+    
+    if not df_comp.empty:
+        # Plot dei punti evidenziati
+        ax.scatter(
+            df_comp[price_col],
+            df_comp["MPI_B"],
+            color='red',
+            edgecolors='black',
+            linewidths=1.5,
+            alpha=0.8,
+            s=120, # Punti più grandi e marcati
+            label="Modelli selezionati"
+        )
+        
+        # 3. Aggiunta delle etichette dettagliate ai punti evidenziati
+        for i, row in df_comp.iterrows():
+            
+            # Testo dettagliato per l'annotazione
+            text_label = (
+                f"{row['label']}\n"
+                f"MPI: {row['MPI_B']:.3f}\n"
+                f"Costo: {row[price_col]:.0f}€\n"
+                f"Value: {row['ValueIndex']:.3f}"
+            )
+            
+            ax.annotate(
+                text_label,
+                (row[price_col], row["MPI_B"]),
+                textcoords="offset points",
+                xytext=(10, 5),  # Sposta l'etichetta a destra e leggermente in alto
+                ha='left',
+                fontsize=8,
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.7, ec="none") # Sfondo per leggibilità
+            )
 
-        # Tabella comparativa (omitted for brevity, keep the original)
-        # ... [CODICE TABELLA COMPARATIVA] ...
-
-        # --- GRAFICO BUBBLE (MPI-B vs Prezzo vs Value Index) ---
-        if PRICE_COL and "ValueIndex" in df_comp.columns:
-            df_val_cmp = df_comp.dropna(subset=[PRICE_COL, "MPI_B", "ValueIndex"]).copy()
-
-            if not df_val_cmp.empty:
-                st.write("### Analisi Qualità/Prezzo/Performance (Bubble Chart)")
-
-                # Normalizzazione per la dimensione delle bolle (ValueIndex 0-1)
-                # La dimensione della bolla è proporzionale a (ValueIndex)^2 per renderla più visibile
-                bubble_size = 200 + 1000 * np.power(df_val_cmp["ValueIndex"], 2)
-
-                fig_bubble, ax_bubble = plt.subplots(figsize=(10, 6))
-
-                # Scatter/Bubble Chart
-                scatter = ax_bubble.scatter(
-                    df_val_cmp[PRICE_COL],
-                    df_val_cmp["MPI_B"],
-                    s=bubble_size,
-                    alpha=0.6,
-                    edgecolors="w",
-                    linewidth=1
-                )
-
-                # Aggiungi etichette alle bolle
-                for i, row in df_val_cmp.iterrows():
-                    # Usa solo le prime due parole del nome per evitare sovrapposizioni
-                    label_short = " ".join(row["label"].split()[:2])
-                    ax_bubble.annotate(
-                        label_short,
-                        (row[PRICE_COL], row["MPI_B"]),
-                        textcoords="offset points",
-                        xytext=(0, 5),
-                        ha='center',
-                        fontsize=8
-                    )
-
-                ax_bubble.set_title("MPI-B vs Prezzo (Dimensione bolla = Value Index)")
-                ax_bubble.set_xlabel(f"{PRICE_COL} (€)")
-                ax_bubble.set_ylabel("MPI-B Score (Performance)")
-                ax_bubble.grid(True, linestyle='--', alpha=0.6)
-                
-                # Aggiungi una nota sulla dimensione della bolla
-                fig_bubble.text(0.95, 0.01, 'Bolla grande = alto Value Index (MPI/Costo)', 
-                                horizontalalignment='right', fontsize=9, color='gray')
+    ax.set_title("MPI-B Score vs. Prezzo (Performance vs. Costo)")
+    ax.set_xlabel(f"{price_col} (€)")
+    ax.set_ylabel("MPI-B Score")
+    ax.set_ylim(0, 1.05)
+    ax.legend(loc='lower right')
+    ax.grid(True, linestyle='--', alpha=0.6)
+    
+    return fig
 
 
-                st.pyplot(fig_bubble)
-            else:
-                st.info("Dati insufficienti (mancano Prezzo, MPI o Value Index) per il Bubble Chart.")
-        else:
-            st.warning("Colonna Prezzo o ValueIndex non disponibile per il confronto.")
+# ============================================
+#   ANALISI E CONFRONTO (RIORGANIZZATO)
+# ============================================
 
-        st.write("---") # Separatore
+# Selezioni da usare in entrambi i grafici (Dettaglio -> Confronto)
+selected_for_detail = None
+if not df_filt.empty:
+    selected_for_detail = st.selectbox(
+        "Seleziona una scarpa per il Dettaglio",
+        df_filt["label"].tolist(),
+        index=0 
+    )
 
-        # --- GRAFICO RADAR SUI 4 INDICI (come prima) ---
-        metrics = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
-        metrics = [m for m in metrics if m in df_comp.columns]
+# --- BLOCCO DETTAGLIO (usa selected_for_detail) ---
+st.subheader("Dettaglio scarpa")
 
-        if metrics:
-            st.write("Profilo radar sugli indici biomeccanici")
-            fig = plot_radar_indices(df_comp, metrics, label_col="label")
-            st.pyplot(fig)
-        else:
-            st.info("Indici per il radar non disponibili.")
-    else:
-        st.info("Seleziona almeno una scarpa per il confronto.")
+if selected_for_detail:
+    scarpa = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
+    # ... [MANTIENI QUI TUTTO IL TUO CODICE DI VISUALIZZAZIONE COL1, COL2, COL3] ...
+    # ... (omesso per brevità nella risposta, ma devi lasciarlo) ...
+    
+    # Riporto qui solo il codice per popolare 'scelta' per il multiselect
+    scelta = selected_for_detail
+
 else:
-    st.info("Servono scarpe nei filtri attuali per fare un confronto.")
+    st.info("Nessuna scarpa corrisponde ai filtri selezionati.")
+    scelta = None
+# --- FINE BLOCCO DETTAGLIO ---
+
+
+# =========================
+#   CONFRONTO SCARPE E GRAFICO GLOBALE
+# =========================
+
+st.subheader("Confronto e Analisi Globale")
+
+# Pre-seleziona la scarpa dal Dettaglio
+initial_selection = [scelta] if scelta and scelta in df_filt["label"].tolist() else []
+
+selezione_confronto = st.multiselect(
+    "Seleziona fino a 5 scarpe da confrontare (per evidenziarle nei grafici)",
+    df_filt["label"].tolist(),
+    max_selections=5,
+    default=initial_selection
+)
+
+if PRICE_COL is not None and PRICE_COL in df_filt.columns:
+    
+    # 1. Prepara i dati validi (MPI e Prezzo validi)
+    df_val = df_filt.dropna(subset=[PRICE_COL, "MPI_B"]).copy()
+    df_val = df_val[df_val[PRICE_COL] > 0]
+    
+    if not df_val.empty:
+        # --- SCATTER PLOT MPI vs PREZZO ---
+        st.write("### 📊 MPI-B vs Prezzo: Posizionamento sul Mercato")
+        fig_scatter = plot_mpi_vs_price(df_val, selezione_confronto, PRICE_COL)
+        st.pyplot(fig_scatter)
+        
+        # --- CLASSIFICA VALUE INDEX ---
+        st.write("### 🏆 Classifica Qualità/Prezzo (MPI-B / Costo)")
+        df_val_sorted = df_val.sort_values(by="ValueIndex", ascending=False)
+        cols_show = ["label", "passo", "MPI_B", PRICE_COL, "ValueIndex"]
+        st.dataframe(df_val_sorted[[c for c in cols_show if c in df_val_sorted.columns]], use_container_width=True)
+    else:
+        st.info("Nessuna scarpa con prezzo e MPI-B validi nei filtri attuali.")
+else:
+    st.warning("Colonna prezzo non disponibile nel dataset per l'analisi.")
+
+
+# --- GRAFICO RADAR (SOLO I MODELLI CONFRONTATI) ---
+if selezione_confronto:
+    st.write("---")
+    st.write("### Profilo Biomeccanico Dettagliato (Radar)")
+    df_comp = df_filt[df_filt["label"].isin(selezione_confronto)].copy()
+
+    metrics = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex"]
+    metrics = [m for m in metrics if m in df_comp.columns]
+
+    if metrics:
+        fig = plot_radar_indices(df_comp, metrics, label_col="label")
+        st.pyplot(fig)
+    else:
+        st.info("Indici per il radar non disponibili.")
 
 
