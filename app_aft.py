@@ -458,21 +458,28 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         
         fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
         
-        # Utilizzo dell'API standard di Streamlit per catturare la selezione al click
-        plotly_event = st.plotly_chart(
+       # Utilizzo dell'API standard di Streamlit per catturare la selezione al click
+        st.plotly_chart(
             fig_scatter, 
             use_container_width=True, 
             selection_mode="single",
-            key='mpi_scatter_chart'
+            key='mpi_scatter_chart' # La chiave per recuperare i dati in session_state
         )
 
-        # CATTURA DELL'EVENTO DI SELEZIONE DAL VALORE DI RITORNO
-        if plotly_event and plotly_event.get('selection'):
-            selection_data = plotly_event['selection']
+        # CATTURA DELL'EVENTO DI SELEZIONE TRAMITE SESSION_STATE
+        
+        # Recupera lo stato di selezione assegnato automaticamente da Streamlit
+        selection_data_state = st.session_state.get('mpi_scatter_chart')
+
+        # Analizza se sono stati selezionati punti
+        if selection_data_state and selection_data_state.get('selection'):
+            selection_points = selection_data_state['selection'].get('points')
             
-            if selection_data.get('points') and selection_data['points'][0].get('customdata'):
-                new_selection = selection_data['points'][0]['customdata'][0]
+            if selection_points and selection_points[0].get('customdata'):
+                # Il label della scarpa è in customdata[0]
+                new_selection = selection_points[0]['customdata'][0]
                 
+                # Aggiorno lo stato se la selezione è cambiata
                 if new_selection != st.session_state['selected_point_key']:
                     st.session_state['selected_point_key'] = new_selection
                     st.rerun() # Ricarica per aggiornare Step 3
@@ -565,3 +572,4 @@ if selected_for_detail:
             st.pyplot(fig)
         else:
             st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+
