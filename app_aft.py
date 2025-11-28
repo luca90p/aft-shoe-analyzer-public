@@ -399,7 +399,7 @@ st.success("MPI Score ricalcolato in base ai tuoi criteri!")
 st.markdown("---")
 
 # ============================================
-# 2. RISULTATI GLOBALI INTERATTIVI
+# 2. RISULTATI GLOBALI INTERATTIVI (Grafico e Classifica)
 # ============================================
 
 st.header("Step 2: Analisi di Mercato (MPI vs Prezzo)")
@@ -419,28 +419,26 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         if 'selected_point_key' not in st.session_state:
             st.session_state['selected_point_key'] = default_label_on_load
         
-        # FIX: Se il modello precedentemente selezionato non è nel nuovo filtro, resettiamo il default.
-        if st.session_state['selected_point_key'] not in df_val_sorted['label'].tolist():
-             st.session_state['selected_point_key'] = default_label_on_load
+        # ⚠️ FIX CRUCIALE PER IL VALUE ERROR:
+        # Se il modello salvato in session_state NON è nella lista filtrata (es. dopo un cambio filtro),
+        # forziamo il reset al primo modello valido della lista corrente.
+        current_model_list = df_val_sorted['label'].tolist()
+        
+        if st.session_state['selected_point_key'] not in current_model_list:
+             st.session_state['selected_point_key'] = current_model_list[0]
         
         selected_label = st.session_state['selected_point_key']
         
         # 2B. SELEZIONE UNIFICATA (Selectbox e Grafico)
         st.write("### 📊 Posizionamento MPI vs Prezzo")
         
-        # Trova l'indice del modello corrente per preimpostare correttamente la selectbox
-        model_list = df_val_sorted['label'].tolist()
-        
-        if selected_label in model_list:
-            selected_index = model_list.index(selected_label)
-        else:
-            selected_index = 0
-            st.session_state['selected_point_key'] = model_list[0] 
-            selected_label = model_list[0]
+        # Ora siamo sicuri che selected_label esiste in current_model_list
+        # Quindi .index() non darà mai ValueError
+        selected_index = current_model_list.index(selected_label)
 
         selected_label_input = st.selectbox(
-            "🔎 **Trova ed evidenzia un modello nel grafico:**",
-            model_list,
+            "🔎 **Trova ed evidenzia un modello nel grafico e nella scheda dettagli:**",
+            current_model_list,
             index=selected_index,
             key='main_selectbox'
         )
@@ -467,3 +465,51 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
 else:
     st.warning("Colonna prezzo non disponibile nel dataset per l'analisi. Impossibile procedere.")
     st.stop()
+
+
+# ============================================
+# 3. SCHEDA DETTAGLIO (Reintrodotta)
+# ============================================
+
+st.markdown("---")
+st.header("Step 3: Scheda Dettaglio Modello Selezionato")
+
+selected_for_detail = st.session_state['selected_point_key']
+
+if selected_for_detail:
+    # Estraiamo i dati per la card
+    row = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
+    
+    # Container visuale per la "Card"
+    with st.container():
+        col_sx, col_dx = st.columns([1, 2])
+        
+        with col_sx:
+            st.subheader(f"{row['marca']}")
+            st.markdown(f"### {row['modello']}")
+            if pd.notna(row.get('versione')):
+                st.caption(f"Versione: {int(row['versione'])}")
+            
+            st.metric("MPI-B Score", f"{row['MPI_B']:.3f}")
+            st.metric("Prezzo", f"{row[PRICE_COL]:.0f} €" if PRICE_COL else "N/A")
+            if pd.notna(row.get('ValueIndex')):
+                st.write(f"**Value Index:** {row['ValueIndex']:.3f}")
+
+        with col_dx:
+            st.write("#### Caratteristiche Biomeccaniche")
+            st.write(f"**Categoria:** {row['passo']} | **Peso:** {row['peso']}g")
+            st.write(f"**Cluster:** {int(row['Cluster'])} – {row['ClusterDescrizione']}")
+            
+            st.markdown("---")
+            # Progress bars per gli indici (0-1)
+            st.write("Shock Absorption (Ammortizz.)")
+            st.progress(float(row['ShockIndex_calc']))
+            
+            st.write("Energy Return (Reattività)")
+            st.progress(float(row['EnergyIndex_calc']))
+            
+            st.write("Flexibility (Rigidità)")
+            st.progress(float(row['FlexIndex']))
+            
+            st.write("Weight Efficiency (Leggerezza)")
+            st.progress(float(row['WeightIndex']))
