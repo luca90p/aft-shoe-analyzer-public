@@ -468,13 +468,42 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         if st.session_state['selected_point_key'] not in df_val_sorted['label'].tolist():
              st.session_state['selected_point_key'] = default_label_on_load
         
-        selected_label = st.session_state['selected_point_key']
+        # --- All'interno dello Step 2 ---
+# ... (codice precedente, inclusa la correzione del filtro nel session_state) ...
+
+selected_label = st.session_state['selected_point_key']
         
-        # 2B. SELEZIONE UNIFICATA (Selectbox e Grafico)
-        st.write("### 📊 Posizionamento MPI vs Prezzo")
-        
-        # Trova l'indice del modello corrente per preimpostare correttamente la selectbox
-        selected_index = df_val_sorted['label'].tolist().index(selected_label)
+# 2B. SELEZIONE UNIFICATA (Selectbox e Grafico)
+st.write("### 📊 Posizionamento MPI vs Prezzo")
+
+# Trova l'indice del modello corrente per preimpostare correttamente la selectbox
+
+model_list = df_val_sorted['label'].tolist()
+
+# ⚠️ FIX: Cerca l'indice solo se il modello selezionato è presente nella lista corrente, altrimenti usa 0.
+if selected_label in model_list:
+    selected_index = model_list.index(selected_label)
+else:
+    # Se il modello non è più nel filtro, usiamo il primo elemento del nuovo filtro
+    selected_index = 0
+    # Aggiorniamo lo stato di sessione con il nuovo default per coerenza
+    st.session_state['selected_point_key'] = model_list[0] 
+
+
+selected_label_input = st.selectbox(
+    "Seleziona un modello per il Dettaglio (o clicca sul grafico per cambiarlo):",
+    model_list,
+    index=selected_index # Usa l'indice trovato
+)
+
+# Aggiorna lo stato se l'utente cambia la selectbox
+if selected_label_input != st.session_state['selected_point_key']:
+     st.session_state['selected_point_key'] = selected_label_input
+     st.rerun() # Ricarica per aggiornare Step 3
+
+selected_points_labels = [st.session_state['selected_point_key']]
+
+# ... (il resto dello Step 2 continua inalterato)
 
         selected_label_input = st.selectbox(
             "Seleziona un modello per il Dettaglio (o clicca sul grafico per cambiarlo):",
@@ -603,4 +632,5 @@ if selected_for_detail:
                 st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
             st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
+
 
