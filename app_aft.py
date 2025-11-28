@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt # Mantenuto per il Radar Plot
 import plotly.express as px
 
 from sklearn.cluster import KMeans
@@ -202,6 +202,7 @@ def plot_radar_indices(df_comp: pd.DataFrame, metrics: list, label_col="label"):
     # --- FIX: Forza la conversione a float in-place per il plotting ---
     for m in metrics:
         if m in df_comp.columns:
+            # Usiamo .loc per evitare SettingWithCopyWarning
             df_comp.loc[:, m] = df_comp[m].astype(float) 
     # ------------------------------------------------------------------
     
@@ -463,7 +464,7 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         if 'selected_point_key' not in st.session_state:
             st.session_state['selected_point_key'] = default_label_on_load
         
-        # ⚠️ FIX: Se il modello precedentemente selezionato non è nel nuovo filtro, resettiamo il default.
+        # FIX: Se il modello precedentemente selezionato non è nel nuovo filtro, resettiamo il default.
         if st.session_state['selected_point_key'] not in df_val_sorted['label'].tolist():
              st.session_state['selected_point_key'] = default_label_on_load
         
@@ -484,14 +485,14 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         # Aggiorna lo stato se l'utente cambia la selectbox
         if selected_label_input != st.session_state['selected_point_key']:
              st.session_state['selected_point_key'] = selected_label_input
-             st.rerun() 
+             st.rerun() # Ricarica per aggiornare Step 3
 
         selected_points_labels = [st.session_state['selected_point_key']]
         
         fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
         
         # Utilizzo dell'API standard di Streamlit per catturare la selezione al click
-        st.plotly_chart(
+        plotly_event = st.plotly_chart(
             fig_scatter, 
             use_container_width=True, 
             selection_mode="single",
@@ -499,17 +500,20 @@ if PRICE_COL is not None and PRICE_COL in df_filt.columns:
         )
 
         # CATTURA DELL'EVENTO DI SELEZIONE TRAMITE SESSION_STATE
-        selection_data_state = st.session_state.get('mpi_scatter_chart')
         
+        selection_data_state = st.session_state.get('mpi_scatter_chart')
+
+        # Analizza se sono stati selezionati punti
         if selection_data_state and selection_data_state.get('selection'):
             selection_points = selection_data_state['selection'].get('points')
             
             if selection_points and selection_points[0].get('customdata'):
                 new_selection = selection_points[0]['customdata'][0]
                 
+                # Aggiorno lo stato se la selezione è cambiata
                 if new_selection != st.session_state['selected_point_key']:
                     st.session_state['selected_point_key'] = new_selection
-                    st.rerun() 
+                    st.rerun() # Ricarica per aggiornare Step 3
 
         # 2C. CLASSIFICA VALUE INDEX
         st.write("### 🏆 Classifica Qualità/Prezzo (MPI-B / Costo)")
@@ -599,4 +603,3 @@ if selected_for_detail:
                 st.info("Dati per il Radar Chart incompleti o non numerici.")
         else:
             st.warning("Seleziona almeno un modello per visualizzare il Radar Chart.")
-
