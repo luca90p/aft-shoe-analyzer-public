@@ -510,4 +510,41 @@ if check_password():
                         st.markdown(f"**{s_row['label']}**")
                         st.caption(f"Dist: {s_row['distanza_similitudine']:.3f}")
             
-            df_rad = pd.concat([df_
+            df_rad = pd.concat([df_filt[df_filt['label']==sel_input], simili], ignore_index=True)
+            st.plotly_chart(plot_radar_comparison_plotly_styled(df_rad, cols_sim), use_container_width=True)
+    else:
+        st.warning("Nessun dato con i filtri attuali.")
+        
+    # ============================================
+    # 5. TABELLA DI CONTROLLO (NUOVA SEZIONE)
+    # ============================================
+    st.markdown("---")
+    with st.expander("📊 Tabella di Controllo Completa (Tutti gli Indici)"):
+        st.info("Questa tabella mostra i valori esatti di tutti gli indici calcolati per ogni scarpa nel filtro corrente.")
+        
+        # Selezioniamo le colonne di interesse
+        # Nota: 'ShockIndex_calc' e 'EnergyIndex_calc' sono quelli dinamici usati per MPI
+        cols_ctrl_base = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StackFactor"]
+        cols_indices = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
+        
+        # Uniamo e verifichiamo esistenza
+        all_cols = cols_ctrl_base + cols_indices
+        if PRICE_COL: all_cols.append(PRICE_COL)
+        
+        existing_cols = [c for c in all_cols if c in df_filt.columns]
+        
+        df_ctrl = df_filt[existing_cols].copy()
+        
+        # Rinomina per leggibilità
+        rename_map = {
+            "ShockIndex_calc": "Shock",
+            "EnergyIndex_calc": "Energy",
+            "FlexIndex": "Flex",
+            "WeightIndex": "Weight",
+            "DriveIndex": "Drive",
+            "StackFactor": "StackFact",
+            "label": "Modello"
+        }
+        df_ctrl = df_ctrl.rename(columns=rename_map)
+        
+        st.dataframe(df_ctrl, use_container_width=True)
