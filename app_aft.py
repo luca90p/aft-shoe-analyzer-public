@@ -8,7 +8,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
 
 # =========================
-#   CONFIGURAZIONE PAGINA
+#   CONFIGURAZIONE PAGINA (PRIMA ISTRUZIONE)
 # =========================
 st.set_page_config(page_title="AFT Analyst", layout="wide")
 
@@ -49,11 +49,15 @@ def check_password():
 if check_password():
 
     # =========================
-    #   FUNZIONI AFT
+    #   FUNZIONI AFT (CALIBRAZIONE NEWTON CORRETTA)
     # =========================
 
     def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
-        """ Calcola il 'Drive Index' (0-1). Scala rigidità corretta 5N-35N. """
+        """
+        Calcola il 'Drive Index' (0-1).
+        FIX: Scala rigidità corretta per valori 5N - 40N.
+        """
+        # 1. Score Piastra
         def score_plate(val):
             val = str(val).lower()
             if 'carbon' in val or 'carbitex' in val: return 1.0
@@ -63,6 +67,7 @@ if check_password():
 
         S_Plate = df['piastra'].apply(score_plate)
 
+        # 2. Score Rocker (Toe Spring)
         def score_rocker(val):
             if pd.isna(val) or str(val) in ['nan', '#N/D']: return 0.0
             try:
@@ -76,19 +81,28 @@ if check_password():
                 return 0.0
                 
         S_Rocker = df['rocker'].apply(score_rocker)
+
+        # 3. Score Schiuma
         S_Foam = df['EnergyIndex'] 
-        
+
+        # 4. Score Rigidità (CORRETTO: Range 5-35N)
         flex_val = pd.to_numeric(df['rigidezza_flex'], errors='coerce').fillna(15)
+        
+        # Normalizziamo: 5N = 0, 35N = 1
         S_Stiffness = (flex_val - 5) / 30.0 
         S_Stiffness = S_Stiffness.clip(0, 1)
 
+        # Formula Teeter-Totter
         Mechanical_Drive = S_Plate * S_Rocker * S_Stiffness
         df['DriveIndex'] = (0.6 * Mechanical_Drive) + (0.4 * S_Foam)
         
         return df
 
     def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
-        """ Calcola gli indici biomeccanici. """
+        """ 
+        Calcola gli indici biomeccanici.
+        FIX: FlexIndex ora usa curve calibrate sui Newton reali (5-40N).
+        """
 
         def safe_minmax(x: pd.Series) -> pd.Series:
             x = x.astype(float)
@@ -97,7 +111,7 @@ if check_password():
             denom = max(xmax - xmin, np.finfo(float).eps)
             return (x - xmin) / denom
 
-        # 1. Shock & Energy
+        # --- 1. Shock & Energy ---
         w_heel = 0.4
         w_mid = 0.6
         S_heel = safe_minmax(df["shock_abs_tallone"])
@@ -108,21 +122,28 @@ if check_password():
         df["ShockIndex"]  = (w_heel * S_heel + w_mid * S_mid) / (w_heel + w_mid)
         df["EnergyIndex"] = (w_heel * ER_h   + w_mid * ER_m)  / (w_heel + w_mid)
 
-        # 2. Flex Index (Range 5-40N)
+        # --- 2. Flex Index (CORRETTO) ---
+        # Dati reali: min ~5N, max ~38N, media ~17N
         Flex = pd.to_numeric(df["rigidezza_flex"], errors='coerce').fillna(15)
         FlexIndex = np.zeros(len(df))
         passi = df["passo"].astype(str).str.lower().to_list()
 
         for i, tipo in enumerate(passi):
             val_N = Flex[i]
+            
             if "race" in tipo:
+                # RACE: Target > 20N. Sigmoide che premia da 15 in su.
+                # Centro: 18N, Pendenza: 4
+                # 10N -> 0.11 | 18N -> 0.50 | 25N -> 0.85
                 FlexIndex[i] = 1 / (1 + np.exp(-(val_N - 18) / 4)) 
             else:
+                # DAILY: Target Comfort ~12N. Gaussiana stretta.
+                # 12N -> 1.0 | 5N -> 0.2 | 20N -> 0.2
                 FlexIndex[i] = np.exp(-((val_N - 12) ** 2) / (2 * 5 ** 2))
                 
         df["FlexIndex"] = FlexIndex
 
-        # 3. Weight Index
+        # --- 3. Weight Index ---
         W = df["peso"].astype(float).to_numpy()
         W_ref = 180.0 
         k = 0.005 
@@ -130,7 +151,7 @@ if check_password():
         WeightIndex = np.clip(WeightIndex, 0, 1)
         df["WeightIndex"] = WeightIndex
 
-        # 4. StackFactor
+        # --- 4. StackFactor ---
         stack = df["altezza_tallone"].astype(float).to_numpy()
         StabilityMod = np.ones(len(df))
         mask_hi = stack > 40
@@ -140,7 +161,7 @@ if check_password():
         df["StackFactor"] = StabilityMod
         df["EnergyIndex"] = df["EnergyIndex"] * StabilityMod
 
-        # 5. Drive Index
+        # --- 5. Drive Index ---
         df = calcola_drive_index(df)
 
         return df
@@ -349,7 +370,7 @@ if check_password():
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
         ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
-        * **Race:** Sigmoide centrata su 18N.
+        * **Race:** Sigmoide centrata su 18N. $I_{Flex} > 0.8$ per valori > 25N.
         * **Daily:** Gaussiana centrata su 12N.
 
         ### 2. Drive Index ($I_{Drive}$)
@@ -388,7 +409,7 @@ if check_password():
 
     df = df_raw.copy()
     PRICE_COL = [c for c in df.columns if "prezzo" in c.lower()]
-    PRICE_COL = PRICE_COL[0] if PRICE_COLS else None
+    PRICE_COL = PRICE_COL[0] if PRICE_COL else None
 
     with st.sidebar:
         st.header("Filtri Database")
@@ -514,37 +535,3 @@ if check_password():
             st.plotly_chart(plot_radar_comparison_plotly_styled(df_rad, cols_sim), use_container_width=True)
     else:
         st.warning("Nessun dato con i filtri attuali.")
-        
-    # ============================================
-    # 5. TABELLA DI CONTROLLO (NUOVA SEZIONE)
-    # ============================================
-    st.markdown("---")
-    with st.expander("📊 Tabella di Controllo Completa (Tutti gli Indici)"):
-        st.info("Questa tabella mostra i valori esatti di tutti gli indici calcolati per ogni scarpa nel filtro corrente.")
-        
-        # Selezioniamo le colonne di interesse
-        # Nota: 'ShockIndex_calc' e 'EnergyIndex_calc' sono quelli dinamici usati per MPI
-        cols_ctrl_base = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StackFactor"]
-        cols_indices = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
-        
-        # Uniamo e verifichiamo esistenza
-        all_cols = cols_ctrl_base + cols_indices
-        if PRICE_COL: all_cols.append(PRICE_COL)
-        
-        existing_cols = [c for c in all_cols if c in df_filt.columns]
-        
-        df_ctrl = df_filt[existing_cols].copy()
-        
-        # Rinomina per leggibilità
-        rename_map = {
-            "ShockIndex_calc": "Shock",
-            "EnergyIndex_calc": "Energy",
-            "FlexIndex": "Flex",
-            "WeightIndex": "Weight",
-            "DriveIndex": "Drive",
-            "StackFactor": "StackFact",
-            "label": "Modello"
-        }
-        df_ctrl = df_ctrl.rename(columns=rename_map)
-        
-        st.dataframe(df_ctrl, use_container_width=True)
