@@ -412,7 +412,7 @@ if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
     st.markdown("**Advanced Footwear Technology Analysis Tool**")
 
-    # --- EXPANDER METODOLOGIA ---
+    # --- EXPANDER METODOLOGIA (AGGIORNATO CON FONTI ESPLICITE) ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
         L'algoritmo MPI-B integra evidenze scientifiche per valutare l'efficienza della calzatura.
@@ -420,20 +420,20 @@ if check_password():
         **1. Costo Metabolico del Peso (Weight Efficiency)**
         *Ogni 100g di massa aggiuntiva aumentano il costo energetico dell'1%.*
         La funzione di penalità del peso segue un decadimento esponenziale calibrato su questa osservazione.
-        * *Fonte:*
+        * *Fonte:* [metabolic cost of running, body weight influence.pdf]
         
         **2. Indice di Spinta Meccanica (Drive Index)**
         La performance non deriva dalla sola piastra, ma dall'interazione ("Teeter-Totter effect") tra la rigidità della piastra e la geometria del rocker in un sistema a perno. Inoltre, la schiuma (PEBA) contribuisce in modo significativo al ritorno elastico.
         * *Formula:* `Drive = (0.6 * (Plate * Rocker * Stiffness)) + (0.4 * Foam)`
-        * *Fonte:*
+        * *Fonte:* [Effects of the curved carbon fibre plate and PEBA foam on the energycost of running and muscle activation.pdf]
         
         **3. Rigidità Longitudinale: La curva a "U" (Flex Index)**
         La relazione tra rigidità (Bending Stiffness) ed economia di corsa non è lineare. Esiste un range ottimale; rigidità eccessiva senza adeguata velocità può peggiorare l'economia.
-        * *Fonte:*
+        * *Fonte:* [The eﬀects of footwear midsole longitudinal bending stiﬀness on runningeconomy and ground contact biomechanics A systematic review and meta-analysis.pdf]
         
         **4. Stack Height e Stabilità**
         L'aumento dello stack migliora l'ammortizzazione e la lunghezza del passo, ma può compromettere la stabilità biomeccanica se non compensato.
-        * *Fonte:*
+        * *Fonte:* [The effects of running shoe stack.pdf]
         """)
 
     # --- EXPANDER FORMULE MATEMATICHE ---
