@@ -3,6 +3,12 @@ import streamlit as st
 import pandas as pd
 from aft_core import calcola_indici, calcola_MPIB, esegui_clustering
 
+# --- NUOVA FUNZIONE UTILITY ---
+def safe_norm(s: pd.Series) -> pd.Series:
+    """ Calcola la normalizzazione Min-Max garantendo la stabilità (evita div/zero). """
+    s = pd.to_numeric(s, errors='coerce').fillna(s.mean())
+    return (s - s.min()) / max(s.max() - s.min(), 1e-9)
+
 def check_password():
     """Ritorna `True` se l'utente ha inserito la password corretta."""
     ACTUAL_PASSWORD = "aft" 
@@ -54,5 +60,6 @@ def load_and_process(path, filename):
             lbl += f" v{int(row['versione'])}"
         return lbl
     df["label"] = df.apply(make_label, axis=1)
+
 
     return df, cluster_summary
