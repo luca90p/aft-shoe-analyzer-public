@@ -6,7 +6,7 @@ import numpy as np
 # Import dai moduli personalizzati
 from aft_core import trova_scarpe_simili
 from aft_plots import render_stars, plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled
-from aft_utils import check_password, load_and_process
+from aft_utils import check_password, load_and_process, safe_norm
 
 # Configurazione Pagina
 st.set_page_config(page_title="AFT Analyst", layout="wide")
@@ -308,3 +308,4 @@ else:
         if PRICE_COL: cols_ctrl.append(PRICE_COL)
 
         st.dataframe(df_filt[cols_ctrl], use_container_width=True)
+
