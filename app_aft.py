@@ -8,7 +8,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
 
 # =========================
-#   CONFIGURAZIONE PAGINA (DEVE ESSERE LA PRIMA ISTRUZIONE)
+#   CONFIGURAZIONE PAGINA (PRIMA ISTRUZIONE)
 # =========================
 st.set_page_config(page_title="AFT Analyst", layout="wide")
 
@@ -17,21 +17,16 @@ st.set_page_config(page_title="AFT Analyst", layout="wide")
 # =========================
 def check_password():
     """Ritorna `True` se l'utente ha inserito la password corretta."""
-
-    # 🔐 IMPOSTA QUI LA TUA PASSWORD
     ACTUAL_PASSWORD = "aft" 
 
     def password_entered():
-        """Controlla se la password inserita è corretta."""
         if st.session_state["password"] == ACTUAL_PASSWORD:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Rimuovi la password dallo stato per sicurezza
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
-    # Se non abbiamo ancora validato la password
     if "password_correct" not in st.session_state:
-        # Prima volta: mostra input
         st.text_input(
             "🔒 Inserisci la Password di accesso:", 
             type="password", 
@@ -39,8 +34,6 @@ def check_password():
             key="password"
         )
         return False
-    
-    # Password errata
     elif not st.session_state["password_correct"]:
         st.text_input(
             "🔒 Inserisci la Password di accesso:", 
@@ -50,29 +43,21 @@ def check_password():
         )
         st.error("😕 Password errata. Riprova.")
         return False
-    
-    # Password corretta
     else:
         return True
-
-# =========================
-#   MAIN APP WRAPPER
-# =========================
-# Tutto il codice dell'app viene eseguito SOLO se check_password restituisce True
 
 if check_password():
 
     # =========================
-    #   FUNZIONI AFT (EVIDENCE-BASED LOGIC)
+    #   FUNZIONI AFT (CALIBRAZIONE NEWTON CORRETTA)
     # =========================
 
     def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
         """
-        Calcola il 'Drive Index' (0-1) basato sull'interazione meccanica (Teeter-Totter effect).
-        Riferimento: Effects of the curved carbon fibre plate and PEBA foam.
+        Calcola il 'Drive Index' (0-1).
+        FIX: Scala rigidità corretta per valori 5N - 40N.
         """
-        
-        # 1. Score Piastra (Plate)
+        # 1. Score Piastra
         def score_plate(val):
             val = str(val).lower()
             if 'carbon' in val or 'carbitex' in val: return 1.0
@@ -82,11 +67,10 @@ if check_password():
 
         S_Plate = df['piastra'].apply(score_plate)
 
-        # 2. Score Rocker (Geometria - Toe Spring)
+        # 2. Score Rocker (Toe Spring)
         def score_rocker(val):
             if pd.isna(val) or str(val) in ['nan', '#N/D']: return 0.0
             try:
-                # Normalizzazione su altezza massima teorica di 10mm
                 clean_val = str(val).replace(',', '.')
                 parts = clean_val.split('x')
                 if len(parts) >= 1:
@@ -98,25 +82,27 @@ if check_password():
                 
         S_Rocker = df['rocker'].apply(score_rocker)
 
-        # 3. Score Schiuma (Energy Return)
+        # 3. Score Schiuma
         S_Foam = df['EnergyIndex'] 
 
-        # 4. Score Rigidità Longitudinale (Leverage support)
-        flex_val = pd.to_numeric(df['rigidezza_flex'], errors='coerce').fillna(100)
-        S_Stiffness = (flex_val - 50) / 250.0
+        # 4. Score Rigidità (CORRETTO: Range 5-35N)
+        flex_val = pd.to_numeric(df['rigidezza_flex'], errors='coerce').fillna(15)
+        
+        # Normalizziamo: 5N = 0, 35N = 1
+        S_Stiffness = (flex_val - 5) / 30.0 
         S_Stiffness = S_Stiffness.clip(0, 1)
 
-        # FORMULA DRIVE: Sinergia Meccanica (Plate * Rocker * Stiffness) + Contributo Schiuma
+        # Formula Teeter-Totter
         Mechanical_Drive = S_Plate * S_Rocker * S_Stiffness
-        
-        # Ponderazione: 60% Meccanica, 40% Materiale (Schiuma)
         df['DriveIndex'] = (0.6 * Mechanical_Drive) + (0.4 * S_Foam)
         
         return df
 
-
     def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
-        """ Calcola gli indici biomeccanici normalizzati basati su letteratura. """
+        """ 
+        Calcola gli indici biomeccanici.
+        FIX: FlexIndex ora usa curve calibrate sui Newton reali (5-40N).
+        """
 
         def safe_minmax(x: pd.Series) -> pd.Series:
             x = x.astype(float)
@@ -136,30 +122,33 @@ if check_password():
         df["ShockIndex"]  = (w_heel * S_heel + w_mid * S_mid) / (w_heel + w_mid)
         df["EnergyIndex"] = (w_heel * ER_h   + w_mid * ER_m)  / (w_heel + w_mid)
 
-        # --- 2. Flex Index (Ottimizzazione non lineare) ---
-        Flex = df["rigidezza_flex"].astype(float).to_numpy()
+        # --- 2. Flex Index (CORRETTO) ---
+        # Dati reali: min ~5N, max ~38N, media ~17N
+        Flex = pd.to_numeric(df["rigidezza_flex"], errors='coerce').fillna(15)
         FlexIndex = np.zeros(len(df))
         passi = df["passo"].astype(str).str.lower().to_list()
 
         for i, tipo in enumerate(passi):
+            val_N = Flex[i]
+            
             if "race" in tipo:
-                # Curva sigmoide per massimizzare la rigidità nelle scarpe da gara
-                FlexIndex[i] = 1 / (1 + np.exp(-(Flex[i] - 200) / 50)) 
+                # RACE: Target > 20N. Sigmoide che premia da 15 in su.
+                # Centro: 18N, Pendenza: 4
+                # 10N -> 0.11 | 18N -> 0.50 | 25N -> 0.85
+                FlexIndex[i] = 1 / (1 + np.exp(-(val_N - 18) / 4)) 
             else:
-                # Curva gaussiana per allenamento (comfort range)
-                FlexIndex[i] = np.exp(-((Flex[i] - 150) ** 2) / (2 * 50 ** 2))
+                # DAILY: Target Comfort ~12N. Gaussiana stretta.
+                # 12N -> 1.0 | 5N -> 0.2 | 20N -> 0.2
+                FlexIndex[i] = np.exp(-((val_N - 12) ** 2) / (2 * 5 ** 2))
                 
         df["FlexIndex"] = FlexIndex
 
-        # --- 3. Weight Index (Costo Metabolico) ---
-        # Regola: +100g = +1% costo energetico.
+        # --- 3. Weight Index ---
         W = df["peso"].astype(float).to_numpy()
         W_ref = 180.0 
         k = 0.005 
-        
         WeightIndex = np.exp(-k * (W - W_ref))
         WeightIndex = np.clip(WeightIndex, 0, 1)
-        
         df["WeightIndex"] = WeightIndex
 
         # --- 4. StackFactor ---
@@ -178,7 +167,6 @@ if check_password():
         return df
 
     def calcola_MPIB(df: pd.DataFrame) -> pd.DataFrame:
-        """ Calcola l'MPI_B (Mescola Performance Index - Biomeccanico). """
         w_shock  = 0.20
         w_energy = 0.30
         w_flex   = 0.20
@@ -196,8 +184,6 @@ if check_password():
 
 
     def esegui_clustering(df: pd.DataFrame):
-        """ Esegue clustering K-Means ottimizzato (Elbow + Silhouette). """
-
         def livello_index(val: float) -> str:
             if val < 0.33: return "Basso"
             elif val < 0.66: return "Medio"
@@ -260,12 +246,9 @@ if check_password():
 
 
     def plot_mpi_vs_price_plotly(df_val, price_col, selected_points_labels):
-        """ Scatter plot interattivo MPI-B vs Prezzo (Plotly Express). """
-        
         df_val['Status'] = df_val['label'].apply(
             lambda x: 'Selezionato' if x in selected_points_labels else 'Database'
         )
-        
         df_val = df_val.sort_values(by='Status', ascending=True).reset_index(drop=True)
         
         df_val['hover_text'] = df_val.apply(
@@ -283,38 +266,23 @@ if check_password():
             size='ValueIndex',
             size_max=20,
             hover_name='hover_text',
-            color_discrete_map={
-                'Selezionato': '#FF4B4B', 
-                'Database': '#A9A9A9'     
-            },
+            color_discrete_map={'Selezionato': '#FF4B4B', 'Database': '#A9A9A9'},
             custom_data=['label'],
             labels={price_col: f'{price_col} [€]', "MPI_B": "Indice MPI-B"},
             title="Analisi Costo-Efficienza (MPI vs Prezzo)"
         )
 
-        fig.update_traces(
-            marker=dict(
-                opacity=0.7,
-                line=dict(width=1, color='#333333')
-            ),
-            selector=dict(mode='markers')
-        )
-        
+        fig.update_traces(marker=dict(opacity=0.7, line=dict(width=1, color='#333333')))
         fig.update_layout(
             hovermode="closest",
             yaxis=dict(title="Performance Index (MPI)", range=[0, 1.05]),
             xaxis=dict(title="Prezzo di Listino (€)"),
-            legend_title_text='Legenda',
             margin=dict(l=20, r=20, t=40, b=20)
         )
-        
         return fig
 
     def plot_radar_comparison_plotly_styled(df_shoes, metrics, title="Analisi Comparativa Radar"):
-        """ Radar Chart poligonale per confronto multi-modello. """
-        
         fig = go.Figure()
-        
         metrics_readable = {
             "ShockIndex_calc": "Shock Abs.",
             "EnergyIndex_calc": "Energy Ret.",
@@ -322,31 +290,23 @@ if check_password():
             "WeightIndex": "Weight Eff.",
             "DriveIndex": "Drive Mech."
         }
-        
         categories = [metrics_readable.get(m, m) for m in metrics]
         comparison_colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd'] 
         
-        # Loop per modelli di confronto (background)
         for i in range(1, len(df_shoes)):
             row = df_shoes.iloc[i]
             values = [float(row[m]) for m in metrics]
             values += [values[0]]
             categories_closed = categories + [categories[0]]
-            
             color = comparison_colors[(i-1) % len(comparison_colors)]
             
             fig.add_trace(go.Scatterpolar(
-                r=values,
-                theta=categories_closed,
-                fill='toself',
+                r=values, theta=categories_closed, fill='toself',
                 name=f"{row['label']} (Simile)",
                 line=dict(color=color, width=1.5, dash='dot'),
-                fillcolor=color,
-                opacity=0.15,
-                hoveron='points+fills'
+                fillcolor=color, opacity=0.15
             ))
 
-        # Modello selezionato (foreground)
         if not df_shoes.empty:
             row = df_shoes.iloc[0]
             values = [float(row[m]) for m in metrics]
@@ -354,49 +314,30 @@ if check_password():
             categories_closed = categories + [categories[0]]
             
             fig.add_trace(go.Scatterpolar(
-                r=values,
-                theta=categories_closed,
-                fill='toself',
-                name=f"{row['label']} (Target)",
+                r=values, theta=categories_closed, fill='toself',
+                name=f"★ {row['label']} (Target)",
                 line=dict(color='#FF4B4B', width=3),
-                fillcolor='rgba(255, 75, 75, 0.1)',
-                opacity=0.9
+                fillcolor='rgba(255, 75, 75, 0.1)', opacity=0.9
             ))
         
         fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, 1],
-                    tickfont=dict(size=9, color="gray"),
-                    gridcolor='#e6e6e6'
-                ),
-                bgcolor='white'
-            ),
-            title=dict(text=title, x=0.5, font=dict(size=16)),
+            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+            title=dict(text=title, x=0.5),
             showlegend=True,
-            legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
             margin=dict(t=50, b=50, l=50, r=50)
         )
-        
         return fig
 
     def trova_scarpe_simili(df, target_label, metrics_cols, n_simili=3):
-        """ Calcolo similarità tramite distanza euclidea su spazio n-dimensionale. """
         try:
             target_vector = df.loc[df['label'] == target_label, metrics_cols].astype(float).values[0]
             df_calc = df.copy()
-            
             vectors = df_calc[metrics_cols].astype(float).values
             distances = np.linalg.norm(vectors - target_vector, axis=1)
-            
             df_calc['distanza_similitudine'] = distances
-            
-            # Filtra se stesso e ordina per distanza
             simili = df_calc[df_calc['label'] != target_label].sort_values('distanza_similitudine').head(n_simili)
             return simili
-        except Exception as e:
-            st.error(f"Errore calcolo vettoriale: {e}")
+        except Exception:
             return pd.DataFrame()
 
     def render_stars(value):
@@ -406,396 +347,191 @@ if check_password():
         return ("★" * score) + ("☆" * (5 - score))
 
     # =========================
-    #   UI PRINCIPALE (DENTRO LOGIN)
+    #   UI PRINCIPALE
     # =========================
-
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
     st.markdown("**Advanced Footwear Technology Analysis Tool**")
 
-    # --- EXPANDER METODOLOGIA (AGGIORNATO CON FONTI ESPLICITE) ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
-        L'algoritmo MPI-B integra evidenze scientifiche per valutare l'efficienza della calzatura.
-        
-        **1. Costo Metabolico del Peso (Weight Efficiency)**
-        *Ogni 100g di massa aggiuntiva aumentano il costo energetico dell'1%.*
-        La funzione di penalità del peso segue un decadimento esponenziale calibrato su questa osservazione.
-        * *Fonte:* [metabolic cost of running, body weight influence.pdf]
+        **1. Costo Metabolico del Peso**
+        Ogni 100g extra aumentano il costo energetico dell'1%.
+        *Fonte:* [metabolic cost of running, body weight influence.pdf]
         
         **2. Indice di Spinta Meccanica (Drive Index)**
-        La performance non deriva dalla sola piastra, ma dall'interazione ("Teeter-Totter effect") tra la rigidità della piastra e la geometria del rocker in un sistema a perno. Inoltre, la schiuma (PEBA) contribuisce in modo significativo al ritorno elastico.
-        * *Formula:* `Drive = (0.6 * (Plate * Rocker * Stiffness)) + (0.4 * Foam)`
-        * *Fonte:* [Effects of the curved carbon fibre plate and PEBA foam on the energycost of running and muscle activation.pdf]
+        Sinergia tra Piastra, Rocker e Rigidità.
+        *Fonte:* [Effects of the curved carbon fibre plate...pdf]
         
-        **3. Rigidità Longitudinale: La curva a "U" (Flex Index)**
-        La relazione tra rigidità (Bending Stiffness) ed economia di corsa non è lineare. Esiste un range ottimale; rigidità eccessiva senza adeguata velocità può peggiorare l'economia.
-        * *Fonte:* [The eﬀects of footwear midsole longitudinal bending stiﬀness on runningeconomy and ground contact biomechanics A systematic review and meta-analysis.pdf]
-        
-        **4. Stack Height e Stabilità**
-        L'aumento dello stack migliora l'ammortizzazione e la lunghezza del passo, ma può compromettere la stabilità biomeccanica se non compensato.
-        * *Fonte:* [The effects of running shoe stack.pdf]
+        **3. Rigidità Longitudinale (Flex Index)**
+        Range misurato: 5N (Soft) - 40N (Stiff).
+        *Fonte:* [The eﬀects of footwear midsole longitudinal bending...pdf]
         """)
 
-    # --- EXPANDER FORMULE MATEMATICHE ---
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
-        Il calcolo del punteggio totale MPI-B si basa su una somma pesata di 5 indici normalizzati $[0, 1]$.
-        
-        ### 1. Normalizzazione dei Dati Grezzi
-        Per gli indici lineari (Shock, Energy), utilizziamo il Min-Max scaling sui dati di laboratorio:
-        $$ I_{norm} = \frac{x - x_{min}}{x_{max} - x_{min}} $$
+        ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
+        * **Race:** Sigmoide centrata su 18N. $I_{Flex} > 0.8$ per valori > 25N.
+        * **Daily:** Gaussiana centrata su 12N.
 
-        ### 2. Weight Efficiency Index ($I_{Weight}$)
-        Basato sul decadimento esponenziale del vantaggio metabolico.
-        $$ I_{Weight} = e^{-k \cdot (Peso_{g} - 180)} $$
-        Dove $k \approx 0.005$ per penalizzare fortemente i pesi > 250g.
-
-        ### 3. Flex Index ($I_{Flex}$)
-        Modellazione non lineare dipendente dal passo (Race vs Daily).
-        * **Race (Sigmoide):** Premia la rigidità elevata.
-          $$ I_{Flex, Race} = \frac{1}{1 + e^{-(Flex - 200)/50}} $$
-        * **Daily (Gaussiana):** Premia un valore intermedio ottimale (~150 N/mm).
-          $$ I_{Flex, Daily} = e^{-\frac{(Flex - 150)^2}{2 \cdot 50^2}} $$
-
-        ### 4. Drive Index ($I_{Drive}$)
-        Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
+        ### 2. Drive Index ($I_{Drive}$)
         $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiffness}) + 0.4 \cdot S_{Foam} $$
-        Dove $S_{Plate}=1.0$ per Carbonio, $S_{Rocker}$ è l'altezza normalizzata della punta.
-
-        ### 5. MPI-B (Mescola Performance Index)
-        Il punteggio finale è la somma pesata dai cursori utente ($w_i$):
-        $$ MPI = w_{Shock} \cdot I_{Shock} + w_{Energy} \cdot I_{Energy} + w_{Flex} \cdot I_{Flex} + w_{Weight} \cdot I_{Weight} $$
+        Dove $S_{Stiffness}$ è normalizzato su 30N.
         """)
 
     file_name = "database_completo_AFT_20251124_clean.csv"
-
-    # =========================
-    #   PRE-PROCESSING
-    # =========================
 
     @st.cache_data
     def load_and_process(path):
         try:
             df = pd.read_csv(path)
         except FileNotFoundError:
-            st.error(f"Errore I/O: File {path} non reperibile.")
+            st.error("File database non trovato.")
             return pd.DataFrame(), pd.DataFrame()
 
         df = calcola_indici(df)
         df = calcola_MPIB(df)
         df, cluster_summary = esegui_clustering(df)
-
-        index_cols = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "StackFactor", "MPI_B", "DriveIndex"]
-        for col in index_cols:
-            if col in df.columns:
-                df[col] = df[col].astype(float).round(3)
-
-        if "drop" in df.columns:
-            df["drop"] = df["drop"].astype(float).round(1)
+        
+        # Arrotondamento
+        cols_to_round = ["ShockIndex", "EnergyIndex", "FlexIndex", "WeightIndex", "MPI_B", "DriveIndex"]
+        for c in cols_to_round: 
+            if c in df.columns: df[c] = df[c].round(3)
 
         price_cols = [c for c in df.columns if "prezzo" in c.lower()]
         if price_cols:
             df[price_cols[0]] = df[price_cols[0]].astype(float).round(0)
-
-        def make_label(row):
-            lbl = f"{row['marca']} {row['modello']}"
-            if pd.notna(row.get("versione")):
-                lbl += f" v{int(row['versione'])}"
-            return lbl
-        df["label"] = df.apply(make_label, axis=1)
-
+            
+        df["label"] = df.apply(lambda r: f"{r['marca']} {r['modello']} v{int(r['versione'])}" if pd.notna(r.get('versione')) else f"{r['marca']} {r['modello']}", axis=1)
         return df, cluster_summary
 
     df_raw, cluster_summary_raw = load_and_process(file_name)
-
-    if df_raw.empty:
-        st.stop()
+    if df_raw.empty: st.stop()
 
     df = df_raw.copy()
-    PRICE_COLS = [c for c in df.columns if "prezzo" in c.lower()]
-    PRICE_COL = PRICE_COLS[0] if PRICE_COLS else None
-
-    # =========================
-    #   SIDEBAR
-    # =========================
+    PRICE_COL = [c for c in df.columns if "prezzo" in c.lower()]
+    PRICE_COL = PRICE_COL[0] if PRICE_COL else None
 
     with st.sidebar:
         st.header("Filtri Database")
-        st.write("Profili Cluster:")
         st.dataframe(cluster_summary_raw, use_container_width=True)
         st.markdown("---")
-
+        
         all_brands = ["Tutte"] + sorted(df["marca"].unique())
         sel_brand = st.selectbox("Marca", all_brands)
-
         all_passi = ["Tutti"] + sorted(df["passo"].unique())
         sel_passo = st.selectbox("Categoria", all_passi)
         
         df_filt = df.copy()
-        if sel_brand != "Tutte":
-            df_filt = df_filt[df_filt["marca"] == sel_brand]
-        if sel_passo != "Tutti":
-            df_filt = df_filt[df_filt["passo"] == sel_passo]
-
-    # ============================================
-    # 1. PARAMETRI MPI
-    # ============================================
+        if sel_brand != "Tutte": df_filt = df_filt[df_filt["marca"] == sel_brand]
+        if sel_passo != "Tutti": df_filt = df_filt[df_filt["passo"] == sel_passo]
 
     st.header("1. Parametrizzazione Performance (MPI)")
-    st.info("Definizione dei pesi per il calcolo dell'indice MPI personalizzato.")
-
-    col_appoggio, col_pesi = st.columns(2)
-
-    with col_appoggio:
-        st.subheader("Appoggio")
-        heel_pct = st.slider("Tallone (%)", 0, 100, 40, 5)
-        w_heel = heel_pct / 100.0
+    c1, c2 = st.columns(2)
+    with c1:
+        heel_pct = st.slider("Appoggio Tallone (%)", 0, 100, 40, 5)
+        w_heel = heel_pct/100
         w_mid = 1.0 - w_heel
-        st.caption(f"Avampiede: {100 - heel_pct}%")
+    with c2:
+        w_shock = st.slider("Shock", 1, 5, 3)
+        w_energy = st.slider("Energy", 1, 5, 3)
+        w_flex = st.slider("Stiffness", 1, 5, 3)
+        w_weight = st.slider("Weight", 1, 5, 3)
 
-    with col_pesi:
-        st.subheader("Ponderazione Fattori")
-        w_shock  = st.slider("Shock Absorption", 1, 5, 3)
-        w_energy = st.slider("Energy Return", 1, 5, 3)
-        w_flex   = st.slider("Longitudinal Stiffness", 1, 5, 3)
-        w_weight = st.slider("Weight Efficiency", 1, 5, 3)
-
-    # Ricalcolo MPI
-    raw_weights = np.array([w_shock, w_energy, w_flex, w_weight], dtype=float)
-    tot = raw_weights.sum() if raw_weights.sum() > 0 else 1.0
-    norm_weights = raw_weights / tot
-    w_shock_eff, w_energy_eff, w_flex_eff, w_weight_eff = norm_weights
-
-    # Ricalcolo Shock/Energy
-    def safe_minmax_series(x):
-        return (x - x.min()) / max(x.max() - x.min(), 1e-12)
-
-    S_heel = safe_minmax_series(df_filt["shock_abs_tallone"])
-    S_mid  = safe_minmax_series(df_filt["shock_abs_mesopiede"])
-    ER_h   = safe_minmax_series(df_filt["energy_ret_tallone"])
-    ER_m   = safe_minmax_series(df_filt["energy_ret_mesopiede"])
-
-    df_filt.loc[:, "ShockIndex_calc"] = (w_heel * S_heel + w_mid * S_mid)
-    df_filt.loc[:, "EnergyIndex_calc"] = (w_heel * ER_h   + w_mid * ER_m)
-    df_filt["ShockIndex_calc"] = safe_minmax_series(df_filt["ShockIndex_calc"])
-    df_filt["EnergyIndex_calc"] = safe_minmax_series(df_filt["EnergyIndex_calc"])
-
-    df_filt.loc[:, "MPI_B"] = (
-        w_shock_eff  * df_filt["ShockIndex_calc"] +
-        w_energy_eff * df_filt["EnergyIndex_calc"] +
-        df_filt["FlexIndex"] * w_flex_eff +
-        df_filt["WeightIndex"] * w_weight_eff
+    # Ricalcolo dinamico
+    def safe_norm(s): return (s - s.min()) / max(s.max() - s.min(), 1e-9)
+    
+    df_filt["ShockIndex_calc"] = safe_norm(w_heel * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
+    df_filt["EnergyIndex_calc"] = safe_norm(w_heel * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
+    
+    tot_w = w_shock + w_energy + w_flex + w_weight
+    df_filt["MPI_B"] = (
+        (w_shock * df_filt["ShockIndex_calc"] + 
+         w_energy * df_filt["EnergyIndex_calc"] + 
+         w_flex * df_filt["FlexIndex"] + 
+         w_weight * df_filt["WeightIndex"]) / tot_w
     ).round(3)
 
     if PRICE_COL:
-        valid_p = (df_filt[PRICE_COL] > 10)
-        vals = df_filt.loc[valid_p, "MPI_B"] / df_filt.loc[valid_p, PRICE_COL]
-        if not vals.empty:
-            v_min, v_max = vals.min(), vals.max()
-            df_filt.loc[valid_p, "ValueIndex"] = ((vals - v_min) / (v_max - v_min)).round(3)
-        else:
-            df_filt["ValueIndex"] = 0.0
+        df_filt = df_filt[df_filt[PRICE_COL] > 0].copy()
+        v_raw = df_filt["MPI_B"] / df_filt[PRICE_COL]
+        df_filt["ValueIndex"] = ((v_raw - v_raw.min()) / (v_raw.max() - v_raw.min())).round(3)
     else:
         df_filt["ValueIndex"] = 0.0
 
+    # Best Pick
     st.markdown("---")
-
-
-    # ============================================
-    # 1.5 BEST PICK
-    # ============================================
-
-    st.header("Ottimizzazione Budget/Performance")
-
+    st.header("💡 Best Pick")
     if PRICE_COL:
-        min_p = int(df_filt[PRICE_COL].min())
-        max_p = int(df_filt[PRICE_COL].max())
-        
-        col_budget, col_best = st.columns([1, 2])
-        
-        with col_budget:
-            budget_max = st.slider(
-                "Budget Massimo (€):",
-                min_value=min_p, 
-                max_value=max_p, 
-                value=int(max_p * 0.8),
-                step=5
-            )
-        
-        df_budget = df_filt[df_filt[PRICE_COL] <= budget_max].copy()
-        
-        with col_best:
-            if not df_budget.empty:
-                best_pick = df_budget.sort_values(by="MPI_B", ascending=False).iloc[0]
-                
-                with st.container(border=True):
-                    c1, c2 = st.columns([2, 1])
-                    with c1:
-                        st.subheader(f"{best_pick['marca']} {best_pick['modello']}")
-                        st.write(f"Best in Class (< {budget_max}€)")
-                        if pd.notna(best_pick.get('versione')):
-                            st.caption(f"Versione: {int(best_pick['versione'])}")
-
-                    with c2:
-                        st.metric("MPI Score", f"{best_pick['MPI_B']:.3f}")
-                        st.write(f"Prezzo: **{best_pick[PRICE_COL]:.0f} €**")
-            else:
-                st.warning("Nessun risultato nel range di budget.")
-
+        b_max = st.slider("Budget Max (€)", int(df_filt[PRICE_COL].min()), int(df_filt[PRICE_COL].max()), 200, 5)
+        picks = df_filt[df_filt[PRICE_COL] <= b_max].sort_values("MPI_B", ascending=False)
+        if not picks.empty:
+            bp = picks.iloc[0]
+            with st.container(border=True):
+                k1, k2 = st.columns([3, 1])
+                k1.subheader(f"🏆 {bp['label']}")
+                k2.metric("MPI", f"{bp['MPI_B']}")
+                k2.write(f"{bp[PRICE_COL]:.0f} €")
+    
+    # Analisi Mercato
     st.markdown("---")
-
-
-    # ============================================
-    # 2. ANALISI MERCATO
-    # ============================================
-
-    st.header("2. Analisi Comparativa di Mercato")
-
-    if PRICE_COL is not None and PRICE_COL in df_filt.columns:
+    st.header("2. Analisi Mercato")
+    
+    if not df_filt.empty:
+        df_val_sorted = df_filt.sort_values("ValueIndex", ascending=False)
+        models = df_val_sorted['label'].tolist()
         
-        df_val = df_filt.dropna(subset=[PRICE_COL, "MPI_B", "ValueIndex"]).copy()
-        df_val = df_val[df_val[PRICE_COL] > 0]
+        if 'selected_point_key' not in st.session_state or st.session_state['selected_point_key'] not in models:
+            st.session_state['selected_point_key'] = models[0]
+            
+        curr_sel = st.session_state['selected_point_key']
+        idx_sel = models.index(curr_sel)
         
-        if not df_val.empty:
+        sel_input = st.selectbox("Seleziona Modello:", models, index=idx_sel, key='main_sb')
+        if sel_input != curr_sel:
+            st.session_state['selected_point_key'] = sel_input
+            st.rerun()
             
-            df_val_sorted = df_val.sort_values(by="ValueIndex", ascending=False)
-            default_label_on_load = df_val_sorted.iloc[0]['label']
-            
-            if 'selected_point_key' not in st.session_state:
-                st.session_state['selected_point_key'] = default_label_on_load
-            
-            current_model_list = df_val_sorted['label'].tolist()
-            if st.session_state['selected_point_key'] not in current_model_list:
-                st.session_state['selected_point_key'] = current_model_list[0]
-            
-            selected_label = st.session_state['selected_point_key']
-            selected_index = current_model_list.index(selected_label)
+        c_plot, c_list = st.columns([3, 1])
+        with c_plot:
+            st.plotly_chart(plot_mpi_vs_price_plotly(df_filt, PRICE_COL, [sel_input]), use_container_width=True)
+        with c_list:
+            st.dataframe(df_val_sorted[["label", "MPI_B", "ValueIndex"]].head(10), use_container_width=True, hide_index=True)
 
-            col_plot, col_list = st.columns([3, 1])
-
-            with col_plot:
-                selected_label_input = st.selectbox(
-                    "Selezione Modello Target:",
-                    current_model_list,
-                    index=selected_index,
-                    key='main_selectbox'
-                )
-                
-                if selected_label_input != st.session_state['selected_point_key']:
-                    st.session_state['selected_point_key'] = selected_label_input
-                    st.rerun() 
-
-                selected_points_labels = [st.session_state['selected_point_key']]
-                fig_scatter = plot_mpi_vs_price_plotly(df_val, PRICE_COL, selected_points_labels)
-                st.plotly_chart(fig_scatter, use_container_width=True)
-
-            with col_list:
-                st.write("Top Value Index")
-                st.dataframe(
-                    df_val_sorted[["label", "MPI_B", "ValueIndex"]].head(10), 
-                    use_container_width=True,
-                    hide_index=True
-                )
-            
-        else:
-            st.info("Dati insufficienti per l'analisi.")
-            st.stop()
-    else:
-        st.stop()
-
-
-    # ============================================
-    # 3. SCHEDA DETTAGLIO
-    # ============================================
-
-    st.markdown("---")
-    st.header("3. Scheda Tecnica Dettagliata")
-
-    selected_for_detail = st.session_state['selected_point_key']
-
-    if selected_for_detail:
-        try:
-            row = df_filt[df_filt["label"] == selected_for_detail].iloc[0]
-        except IndexError:
-            st.stop()
+        # Dettaglio
+        st.markdown("---")
+        st.header("3. Scheda Tecnica")
+        row = df_filt[df_filt["label"] == sel_input].iloc[0]
         
         with st.container(border=True):
-            col_sx, col_dx = st.columns([1, 2])
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                st.subheader(row['marca'])
+                st.markdown(f"**{row['modello']}**")
+                st.metric("MPI", row['MPI_B'])
+                st.write(f"**Value:** {row['ValueIndex']} {render_stars(row['ValueIndex'])}")
+            with c2:
+                st.write(f"Peso: {row['peso']}g | Cluster: {row['ClusterDescrizione']}")
+                colA, colB = st.columns(2)
+                colA.progress(row['ShockIndex_calc'], text=f"Shock: {row['ShockIndex_calc']:.2f}")
+                colB.progress(row['EnergyIndex_calc'], text=f"Energy: {row['EnergyIndex_calc']:.2f}")
+                colA.progress(row['FlexIndex'], text=f"Flex: {row['FlexIndex']:.2f}")
+                colB.progress(row['DriveIndex'], text=f"Drive: {row['DriveIndex']:.2f}")
+
+        # Simili
+        st.markdown("---")
+        st.header("4. Similitudine & Radar")
+        cols_sim = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
+        simili = trova_scarpe_simili(df_filt, sel_input, cols_sim)
+        
+        if not simili.empty:
+            cc = st.columns(3)
+            for i, (_, s_row) in enumerate(simili.iterrows()):
+                with cc[i]:
+                    with st.container(border=True):
+                        st.markdown(f"**{s_row['label']}**")
+                        st.caption(f"Dist: {s_row['distanza_similitudine']:.3f}")
             
-            with col_sx:
-                st.subheader(f"{row['marca']}")
-                st.markdown(f"### {row['modello']}")
-                if pd.notna(row.get('versione')):
-                    st.caption(f"Versione: {int(row['versione'])}")
-                
-                st.metric("MPI-B Score", f"{row['MPI_B']:.3f}")
-                st.metric("Prezzo", f"{row[PRICE_COL]:.0f} €")
-                
-                if pd.notna(row.get('ValueIndex')):
-                    val_idx = float(row['ValueIndex'])
-                    st.write("**Value Index:**")
-                    st.markdown(f"### {val_idx:.3f}")
-
-            with col_dx:
-                st.write("#### Profilo Biomeccanico")
-                st.write(f"**Categoria:** {row['passo']} | **Massa:** {row['peso']}g")
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    val_shock = float(row['ShockIndex_calc'])
-                    st.caption(f"Shock Absorption: {val_shock:.2f}")
-                    st.progress(val_shock)
-                    
-                    val_flex = float(row['FlexIndex'])
-                    st.caption(f"Longitudinal Stiffness: {val_flex:.2f}")
-                    st.progress(val_flex)
-                with c2:
-                    val_energy = float(row['EnergyIndex_calc'])
-                    st.caption(f"Energy Return: {val_energy:.2f}")
-                    st.progress(val_energy)
-                    
-                    val_weight = float(row['WeightIndex'])
-                    st.caption(f"Weight Efficiency: {val_weight:.2f}")
-                    st.progress(val_weight)
-                
-                # Drive Section
-                val_drive = float(row['DriveIndex'])
-                st.caption(f"Drive Index (Teeter-Totter): {val_drive:.2f}")
-                st.progress(val_drive)
-
-    # ============================================
-    # 4. MODELLI SIMILI & RADAR
-    # ============================================
-
-    st.markdown("---")
-    st.header("4. Analisi di Similarità Vettoriale")
-
-    cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
-    df_simili = trova_scarpe_simili(df_filt, selected_for_detail, cols_simil, n_simili=3)
-
-    if not df_simili.empty:
-        cols = st.columns(3)
-        for i, (idx, row_sim) in enumerate(df_simili.iterrows()):
-            with cols[i]:
-                with st.container(border=True):
-                    label_sim = row_sim['label']
-                    st.markdown(f"**{label_sim}**")
-                    
-                    diff_prezzo = row_sim[PRICE_COL] - row[PRICE_COL]
-                    diff_txt = f"+{diff_prezzo:.0f}" if diff_prezzo > 0 else f"{diff_prezzo:.0f}"
-                    
-                    st.write(f"{row_sim[PRICE_COL]:.0f}€ (Diff: {diff_txt}€)")
-                    st.caption(f"MPI: {row_sim['MPI_B']:.3f}")
-                    st.caption(f"Euclidean Dist: {row_sim['distanza_similitudine']:.3f}")
-        
-        st.markdown("#### Analisi Radar Comparativa")
-        df_radar = pd.concat([
-            df_filt[df_filt['label'] == selected_for_detail],
-            df_simili
-        ], ignore_index=True)
-        
-        fig_radar = plot_radar_comparison_plotly_styled(df_radar, cols_simil)
-        st.plotly_chart(fig_radar, use_container_width=True)
-                
+            df_rad = pd.concat([df_filt[df_filt['label']==sel_input], simili], ignore_index=True)
+            st.plotly_chart(plot_radar_comparison_plotly_styled(df_rad, cols_sim), use_container_width=True)
     else:
-        st.write("Nessun modello comparabile identificato con i filtri attuali.")
+        st.warning("Nessun dato con i filtri attuali.")
