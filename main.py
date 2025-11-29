@@ -71,38 +71,155 @@ if check_password():
         if sel_brand != "Tutte": df_filt = df_filt[df_filt["marca"] == sel_brand]
         if sel_passo != "Tutti": df_filt = df_filt[df_filt["passo"] == sel_passo]
 
-    # --- STEP 1: MPI ---
-    st.header("1. Parametrizzazione Performance (MPI)")
-    c1, c2 = st.columns(2)
-    with c1:
-        heel_pct = st.slider("Appoggio Tallone (%)", 0, 100, 40, 5)
-        w_heel = heel_pct/100
-        w_mid = 1.0 - w_heel
-    with c2:
-        w_shock = st.slider("Shock", 1, 5, 3)
-        w_energy = st.slider("Energy", 1, 5, 3)
-        w_flex = st.slider("Stiffness", 1, 5, 3)
-        w_weight = st.slider("Weight", 1, 5, 3)
+    # ============================================
+# 1. WIZARD GUIDATO (SEMPIFICATO)
+# ============================================
 
-    # Ricalcolo Dinamico MPI
-    def safe_norm(s): return (s - s.min()) / max(s.max() - s.min(), 1e-9)
-    df_filt["ShockIndex_calc"] = safe_norm(w_heel * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
-    df_filt["EnergyIndex_calc"] = safe_norm(w_heel * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
+st.header("1. Il tuo Profilo di Corsa")
+st.info("Rispondi a queste domande per trovare la scarpa perfetta per le tue esigenze.")
+
+# --- INTERFACCIA UTENTE SEMPLIFICATA ---
+col_obiettivi, col_preferenze = st.columns(2)
+
+with col_obiettivi:
+    st.subheader("🎯 Obiettivo")
     
-    tot_w = w_shock + w_energy + w_flex + w_weight
-    df_filt["MPI_B"] = (
-        (w_shock * df_filt["ShockIndex_calc"] + 
-         w_energy * df_filt["EnergyIndex_calc"] + 
-         w_flex * df_filt["FlexIndex"] + 
-         w_weight * df_filt["WeightIndex"]) / tot_w
-    ).round(3)
+    # Slider: Tipo di Corsa
+    run_type = st.select_slider(
+        "Per cosa userai queste scarpe?",
+        options=["Recupero / Easy", "Lungo Lento", "Allenamento Quotidiano", "Tempo / Ripetute", "Gara / PB"],
+        value="Allenamento Quotidiano"
+    )
+    
+    # Slider: Peso Corporeo / Importanza Leggerezza
+    weight_priority = st.slider(
+        "Quanto è importante che la scarpa sia leggera?",
+        min_value=0, max_value=100, value=50, step=10,
+        help="0 = Non mi interessa il peso, voglio protezione. 100 = Voglio la scarpa più leggera possibile."
+    )
 
-    if PRICE_COL:
-        df_filt = df_filt[df_filt[PRICE_COL] > 0].copy()
-        v_raw = df_filt["MPI_B"] / df_filt[PRICE_COL]
-        df_filt["ValueIndex"] = ((v_raw - v_raw.min()) / (v_raw.max() - v_raw.min())).round(3)
-    else:
-        df_filt["ValueIndex"] = 0.0
+with col_preferenze:
+    st.subheader("❤️ Sensazioni")
+    
+    # Slider: Feeling (Soft vs Responsive)
+    feel_preference = st.select_slider(
+        "Che sensazione cerchi sotto il piede?",
+        options=["Nuvola (Max Morbidezza)", "Bilanciata", "Secca / Reattiva"],
+        value="Bilanciata"
+    )
+    
+    # Slider: Appoggio (Resta tecnico ma semplificato)
+    heel_pct = st.slider(
+        "Come appoggi il piede?",
+        min_value=0, max_value=100, value=40, step=10,
+        help="0% = Tutto sull'avampiede (Punta). 100% = Tutto sul tallone."
+    )
+
+# --- MOTORE DI TRADUZIONE (USER -> TECH) ---
+# Traduciamo le scelte dell'utente in pesi (w) per l'algoritmo MPI
+
+# 1. Mappatura Obiettivo (0-4)
+map_run_type = {
+    "Recupero / Easy": 0,
+    "Lungo Lento": 1,
+    "Allenamento Quotidiano": 2,
+    "Tempo / Ripetute": 3,
+    "Gara / PB": 4
+}
+score_goal = map_run_type[run_type] # 0 a 4
+
+# 2. Mappatura Feeling (0-2)
+map_feel = {
+    "Nuvola (Max Morbidezza)": 0,
+    "Bilanciata": 1,
+    "Secca / Reattiva": 2
+}
+score_feel = map_feel[feel_preference] # 0 a 2
+
+# --- CALCOLO PESI AUTOMATICO ---
+# Base di partenza
+w_shock = 2.0
+w_energy = 2.0
+w_flex = 1.0
+w_weight = 1.0
+
+# Aggiustamento basato su OBIETTIVO
+# Più si va verso Gara, meno conta Shock, più contano Energy e Flex
+w_shock  -= score_goal * 0.3  # Toglie importanza all'ammortizzazione pura
+w_energy += score_goal * 0.8  # Aumenta drasticamente ritorno energia
+w_flex   += score_goal * 0.6  # Aumenta importanza rigidità/spinta
+
+# Aggiustamento basato su FEELING
+if score_feel == 0: # Nuvola (Max Morbidezza)
+    w_shock += 2.0
+    w_flex  -= 0.5
+elif score_feel == 2: # Secca / Reattiva
+    w_shock -= 0.5
+    w_flex  += 1.0
+    w_energy += 0.5
+
+# Aggiustamento basato su IMPORTANZA PESO
+# Scala da 0.5 (poco importante) a 4.0 (fondamentale)
+w_weight = 0.5 + (weight_priority / 100.0) * 3.5
+
+# Assicuriamoci che nessun peso sia troppo basso
+w_shock = max(0.1, w_shock)
+w_energy = max(0.1, w_energy)
+w_flex = max(0.1, w_flex)
+w_weight = max(0.1, w_weight)
+
+# Normalizzazione per visualizzazione (somma 100%)
+total_w = w_shock + w_energy + w_flex + w_weight
+pct_shock = (w_shock / total_w) * 100
+pct_energy = (w_energy / total_w) * 100
+pct_flex = (w_flex / total_w) * 100
+pct_weight = (w_weight / total_w) * 100
+
+# --- FEEDBACK VISIVO UTENTE ---
+with st.expander(f"⚙️ Vedi come l'algoritmo ha interpretato le tue scelte (Pesi Tecnici)"):
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Ammortizz.", f"{pct_shock:.0f}%")
+    c2.metric("Ritorno Energia", f"{pct_energy:.0f}%")
+    c3.metric("Spinta/Rigidità", f"{pct_flex:.0f}%")
+    c4.metric("Leggerezza", f"{pct_weight:.0f}%")
+
+
+# --- CALCOLO MPI REALE ---
+w_mid = 1.0 - (heel_pct / 100.0)
+w_heel_val = heel_pct / 100.0
+
+# Ricalcolo dinamico indici parziali (usa la logica Shock/Energy modificata)
+def safe_norm(s): 
+    # Usiamo una funzione interna per la normalizzazione del df filtrato
+    s = pd.to_numeric(s, errors='coerce').fillna(s.mean())
+    return (s - s.min()) / max(s.max() - s.min(), 1e-9)
+
+# Qui usiamo la logica di ammortizzazione tallone/mesopiede
+df_filt["ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
+df_filt["EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
+
+# Calcolo MPI Finale Ponderato
+df_filt["MPI_B"] = (
+    (w_shock * df_filt["ShockIndex_calc"] + 
+     w_energy * df_filt["EnergyIndex_calc"] + 
+     w_flex * df_filt["FlexIndex"] + 
+     w_weight * df_filt["WeightIndex"]) / total_w
+).round(3)
+
+# Calcolo Value Index
+if PRICE_COL and not df_filt.empty:
+    # Filtra prezzi validi e ValueIndex
+    df_filt = df_filt[df_filt[PRICE_COL] > 0].copy()
+    v_raw = df_filt["MPI_B"] / df_filt[PRICE_COL]
+    
+    # Normalizza ValueIndex
+    v_min = v_raw.min()
+    v_max = v_raw.max()
+    denom = max(v_max - v_min, 1e-9) # Evita divisione per zero
+    
+    df_filt["ValueIndex"] = ((v_raw - v_min) / denom).round(3)
+else:
+    df_filt["ValueIndex"] = 0.0
 
     # --- BEST PICK ---
     st.markdown("---")
@@ -189,4 +306,5 @@ if check_password():
     with st.expander("📊 Tabella di Controllo Completa"):
         cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StackFactor", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
         if PRICE_COL: cols_ctrl.append(PRICE_COL)
+
         st.dataframe(df_filt[cols_ctrl], use_container_width=True)
