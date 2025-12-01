@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 
 # Import dai moduli personalizzati
 from aft_core import trova_scarpe_simili
-from aft_plots import plot_radar_comparison_plotly_styled, render_stars
+from aft_plots import plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled, render_stars
 from aft_utils import check_password, load_and_process, safe_norm
 
 # =========================
@@ -101,7 +101,7 @@ if check_password():
         )
 
     with col_preferenze:
-        st.subheader("❤️ Sensazioni Richieste")
+        st.subheader("❤️ Sensazioni")
         
         shock_preference = st.select_slider(
             "Ammortizzazione e Protezione (Shock):",
@@ -146,20 +146,17 @@ if check_password():
 
     with st.expander(f"⚙️ Pesi Tecnici Applicati"):
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Ammortizz.", f"{pct_shock:.0f}%")
-        c2.metric("Ritorno Energia", f"{pct_energy:.0f}%")
-        c3.metric("Spinta/Rigidità", f"{pct_flex:.0f}%")
-        c4.metric("Leggerezza", f"{pct_weight:.0f}%")
+        c1.metric("Ammortizz.", f"{pct_shock:.0f} %")
+        c2.metric("Ritorno Energia", f"{pct_energy:.0f} %")
+        c3.metric("Spinta/Rigidità", f"{pct_flex:.0f} %")
+        c4.metric("Leggerezza", f"{pct_weight:.0f} %")
 
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
-    def safe_norm(s): 
-        s = pd.to_numeric(s, errors='coerce').fillna(s.mean())
-        return (s - s.min()) / max(s.max() - s.min(), 1e-9)
-
+    # FIX APPLICATO: Sostituito df.filt con df_filt
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
-    df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df.filt["energy_ret_mesopiede"])
+    df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
     df_filt.loc[:, "MPI_B"] = (
         (w_shock * df_filt["ShockIndex_calc"] + 
@@ -180,7 +177,7 @@ if check_password():
     # ============================================
 
     st.markdown("---")
-    st.header("💡 Best Pick: Il Leader per il tuo Budget")
+    st.header("💡 Best Pick: Il Podio per il tuo Budget")
     
     best_pick_label = None
 
