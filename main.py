@@ -22,22 +22,26 @@ if check_password():
         st.markdown("""
         **1. Costo Metabolico del Peso**
         Ogni 100g extra aumentano il costo energetico dell'1%.
+        *Fonte:* [metabolic cost of running, body weight influence.pdf]
         
         **2. Indice di Spinta Meccanica (Drive Index)**
-        La performance deriva dall'interazione ("Teeter-Totter effect") tra piastra, rocker e rigidità.
+        Sinergia tra Piastra, Rocker e Rigidità.
+        *Fonte:* [Effects of the curved carbon fibre plate and PEBA foam on the energycost of running and muscle activation.pdf]
         
         **3. Rigidità Longitudinale (Flex Index)**
-        Range misurato: 5N (Soft) - 40N (Stiff). La relazione con l'economia di corsa non è lineare.
+        Range misurato: 5N (Soft) - 40N (Stiff).
+        *Fonte:* [The eﬀects of footwear midsole longitudinal bending stiﬀness on runningeconomy and ground contact biomechanics A systematic review and meta-analysis.pdf]
         """)
 
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
+        Il calcolo del punteggio totale MPI-B si basa su una somma pesata di 5 indici normalizzati $[0, 1]$.
+        
         ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
         * **Race:** Sigmoide centrata su 18N.
         * **Daily:** Gaussiana centrata su 12N.
 
         ### 2. Drive Index ($I_{Drive}$)
-        Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
         $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiffness}) + 0.4 \cdot S_{Foam} $$
         """)
 
@@ -67,14 +71,14 @@ if check_password():
         if sel_passo != "Tutti": df_filt = df_filt[df_filt["passo"] == sel_passo]
 
     # ============================================
-    # 1. WIZARD GUIDATO (RETTIFICATO)
+    # 1. WIZARD GUIDATO
     # ============================================
 
-    st.header("1. Il tuo Profilo di Corsa")
+    st.header("1. Parametrizzazione Performance (MPI)")
     st.info("Definisci i criteri per calcolare l'indice MPI personalizzato in base alle tue esigenze.")
 
-    # --- INTERFACCIA UTENTE SEMPLIFICATA E DISACCOPPIATA ---
-    col_obiettivi, col_sensazioni = st.columns(2)
+    # --- INTERFACCIA UTENTE SEMPLIFICATA ---
+    col_obiettivi, col_preferenze = st.columns(2)
 
     with col_obiettivi:
         st.subheader("🎯 Obiettivo e Stile")
@@ -89,10 +93,9 @@ if check_password():
             help="0% = Priorità protezione. 100% = Priorità efficienza."
         )
 
-    with col_sensazioni:
+    with col_preferenze:
         st.subheader("❤️ Sensazioni Richieste")
         
-        # SLIDER DISACCOPPIATI: SHOCK (Protezione) vs DRIVE (Spinta/Reattività)
         shock_preference = st.select_slider(
             "Ammortizzazione e Protezione (Shock):",
             options=["Minima", "Moderata", "Bilanciata", "Elevata", "Massima"],
@@ -121,28 +124,15 @@ if check_password():
     score_shock = map_pref[shock_preference]
     score_drive = map_pref[drive_preference]
 
-    # --- CALCOLO PESI AUTOMATICO ---
-    # Inizializzazione pesi base
+    # Calcolo pesi euristici
     w_shock, w_energy, w_flex, w_weight = 1.0, 1.0, 1.0, 1.0
-
-    # Ponderazione SHOCK/ENERGY/FLEX in base a PREFERENZE (Disaccoppiato)
-    # L'indice Drive è correlato a Energy/Flex, lo useremo come fattore principale per la spinta.
+    w_shock -= score_goal * 0.3; w_energy += score_goal * 0.8; w_flex += score_goal * 0.6
+    if score_shock == 0: w_shock += 0.5; w_energy -= 0.5; w_flex -= 0.5
+    elif score_shock == 4: w_shock += 1.5; w_energy -= 0.5
+    if score_drive == 0: w_energy -= 0.5; w_flex -= 0.5
+    elif score_drive == 4: w_energy += 1.5; w_flex += 1.0
     
-    # 1. Shock/Ammortizzazione (dipende solo da W_SHOCK)
-    w_shock = 0.5 + score_shock * 1.5
-
-    # 2. Spinta (Aumenta W_ENERGY e W_FLEX in base a DRIVE preference)
-    w_energy = 0.5 + score_drive * 1.0
-    w_flex   = 0.5 + score_drive * 1.0
-    
-    # 3. Ponderazione Leggerezza
     w_weight = 0.5 + (weight_priority / 100.0) * 3.5
-
-    # 4. Aggiustamenti finali basati su OBIETTIVO (Il fattore Race è dominante)
-    w_energy += score_goal * 0.5 # Premia l'Energy per la Gara
-    w_flex   += score_goal * 0.4 # Premia la Rigidità per la Gara
-
-    # Clamp e Normalizzazione
     w_shock, w_energy, w_flex, w_weight = max(0.1, w_shock), max(0.1, w_energy), max(0.1, w_flex), max(0.1, w_weight)
     total_w = w_shock + w_energy + w_flex + w_weight
     pct_shock, pct_energy, pct_flex, pct_weight = (w_shock / total_w) * 100, (w_energy / total_w) * 100, (w_flex / total_w) * 100, (w_weight / total_w) * 100
@@ -157,7 +147,6 @@ if check_password():
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
-    # Ricalcolo dinamico indici parziali (Shock/Energy)
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
@@ -175,12 +164,12 @@ if check_password():
     else:
         df_filt["ValueIndex"] = 0.0
 
-    # --- RESTO DELL'APP ---
-    # ... (Il resto del codice continua) ...
-    
-    # Best Pick
+    # --- BEST PICK ---
     st.markdown("---")
     st.header("💡 Best Pick")
+    
+    best_pick_label = None # Inizializzazione
+    
     if PRICE_COL:
         min_price = df_filt[PRICE_COL].min()
         max_price = df_filt[PRICE_COL].max()
@@ -189,40 +178,64 @@ if check_password():
         max_p = int(max_price) if not np.isnan(max_price) else 300
         default_p = int(min_p + (max_p - min_p) * 0.75)
 
-        b_max = st.slider("Budget Max (€)", min_p, max_p, default_p, 5)
-        
-        picks = df_filt[df_filt[PRICE_COL] <= b_max].sort_values("MPI_B", ascending=False)
-        if not picks.empty:
-            bp = picks.iloc[0]
-            with st.container(border=True):
-                k1, k2 = st.columns([3, 1])
-                with k1:
-                    st.subheader(f"🏆 {bp['marca']} {bp['modello']}")
-                    st.write(f"Best in Class (< {b_max}€)")
-                    if pd.notna(bp.get('versione')):
-                        st.caption(f"Versione: {int(bp['versione'])}")
+        col_budget, col_best = st.columns([1, 2])
 
-                with k2:
-                    st.metric("MPI", f"{bp['MPI_B']}")
-                    st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
-        else:
-            st.warning("Nessun risultato nel range di budget.")
-    
-    # Analisi Mercato
+        with col_budget:
+            budget_max = st.slider("Budget Max (€):", min_p, max_p, default_p, 5)
+        
+        df_budget = df_filt[df_filt[PRICE_COL] <= budget_max].copy()
+        
+        with col_best:
+            if not df_budget.empty:
+                bp = df_budget.sort_values(by="MPI_B", ascending=False).iloc[0]
+                best_pick_label = bp['label'] # <--- MEMORIZZA IL BEST PICK
+                
+                with st.container(border=True):
+                    k1, k2 = st.columns([3, 1])
+                    with k1:
+                        st.subheader(f"🏆 {bp['marca']} {bp['modello']}")
+                        st.write(f"Best in Class (< {budget_max}€)")
+                        if pd.notna(bp.get('versione')):
+                            st.caption(f"Versione: {int(bp['versione'])}")
+
+                    with k2:
+                        st.metric("MPI Score", f"{bp['MPI_B']:.3f}")
+                        st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
+            else:
+                st.warning("Nessun risultato nel range di budget.")
+
+    # ============================================
+    # 2. ANALISI MERCATO (UTILIZZA BEST PICK COME DEFAULT)
+    # ============================================
+
     st.markdown("---")
-    st.header("2. Analisi Mercato")
+    st.header("2. Analisi Comparativa di Mercato")
     
     if not df_filt.empty:
         df_val_sorted = df_filt.sort_values("ValueIndex", ascending=False)
         models = df_val_sorted['label'].tolist()
         
-        if 'selected_point_key' not in st.session_state or st.session_state['selected_point_key'] not in models:
+        # 1. Trova l'etichetta da usare come default
+        if 'selected_point_key' not in st.session_state:
+            # Inizializzazione al primo modello del database
             st.session_state['selected_point_key'] = models[0]
-            
+        
+        # 2. Aggiorna lo stato: Se BEST_PICK è disponibile e valido, usalo.
+        if best_pick_label and best_pick_label in models:
+            st.session_state['selected_point_key'] = best_pick_label
+        
+        # 3. Controllo consistenza (fallback)
         curr_sel = st.session_state['selected_point_key']
+        if curr_sel not in models:
+            curr_sel = models[0]
+            st.session_state['selected_point_key'] = curr_sel
+
         idx_sel = models.index(curr_sel)
         
+        # Selectbox (Il widget che controlla la selezione finale)
         sel_input = st.selectbox("Selezione Modello Target:", models, index=idx_sel, key='main_sb')
+        
+        # Se l'utente cambia la selectbox, aggiorna lo stato
         if sel_input != curr_sel:
             st.session_state['selected_point_key'] = sel_input
             st.rerun()
@@ -234,7 +247,7 @@ if check_password():
             st.write("Top Value")
             st.dataframe(df_val_sorted[["label", "MPI_B", "ValueIndex"]].head(10), use_container_width=True, hide_index=True)
 
-        # Dettaglio
+        # --- STEP 3: DETTAGLIO ---
         st.markdown("---")
         st.header("3. Scheda Tecnica")
         row = df_filt[df_filt["label"] == sel_input].iloc[0]
@@ -254,7 +267,7 @@ if check_password():
                 colA.progress(row['FlexIndex'], text=f"Flex: {row['FlexIndex']:.2f}")
                 colB.progress(row['DriveIndex'], text=f"Drive: {row['DriveIndex']:.2f}")
 
-        # Simili
+        # --- STEP 4: SIMILITUDINE ---
         st.markdown("---")
         st.header("4. Similitudine & Radar")
         cols_sim = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
