@@ -6,7 +6,7 @@ import numpy as np
 # Import dai moduli personalizzati
 from aft_core import trova_scarpe_simili
 from aft_plots import plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled, render_stars
-from aft_utils import check_password, load_and_process, safe_norm # safe_norm importata qui
+from aft_utils import check_password, load_and_process, safe_norm
 
 # =========================
 #   CONFIGURAZIONE E LOGIN
@@ -22,15 +22,12 @@ if check_password():
         st.markdown("""
         **1. Costo Metabolico del Peso**
         Ogni 100g extra aumentano il costo energetico dell'1%.
-        *Fonte:*
         
         **2. Indice di Spinta Meccanica (Drive Index)**
-        Sinergia tra Piastra, Rocker e Rigidità.
-        *Fonte:*
+        La performance deriva dall'interazione ("Teeter-Totter effect") tra piastra, rocker e rigidità.
         
         **3. Rigidità Longitudinale (Flex Index)**
-        Range misurato: 5N (Soft) - 40N (Stiff).
-        *Fonte:*
+        Range misurato: 5N (Soft) - 40N (Stiff). La relazione con l'economia di corsa non è lineare.
         """)
 
     with st.expander("📐 Formule Matematiche del Modello AFT"):
@@ -70,17 +67,17 @@ if check_password():
         if sel_passo != "Tutti": df_filt = df_filt[df_filt["passo"] == sel_passo]
 
     # ============================================
-    # 1. WIZARD GUIDATO (NUOVO BLOCCO)
+    # 1. WIZARD GUIDATO (RETTIFICATO)
     # ============================================
 
     st.header("1. Il tuo Profilo di Corsa")
     st.info("Definisci i criteri per calcolare l'indice MPI personalizzato in base alle tue esigenze.")
 
-    # --- INTERFACCIA UTENTE SEMPLIFICATA ---
-    col_obiettivi, col_preferenze = st.columns(2)
+    # --- INTERFACCIA UTENTE SEMPLIFICATA E DISACCOPPIATA ---
+    col_obiettivi, col_sensazioni = st.columns(2)
 
     with col_obiettivi:
-        st.subheader("🎯 Obiettivo e Corsa")
+        st.subheader("🎯 Obiettivo e Stile")
         run_type = st.select_slider(
             "Per cosa userai queste scarpe?",
             options=["Recupero / Easy", "Lungo Lento", "Allenamento Quotidiano", "Tempo / Ripetute", "Gara / PB"],
@@ -89,16 +86,27 @@ if check_password():
         weight_priority = st.slider(
             "Importanza della leggerezza:",
             min_value=0, max_value=100, value=50, step=10,
-            help="0% = Non importante (priorità protezione). 100% = Priorità assoluta (efficienza)."
+            help="0% = Priorità protezione. 100% = Priorità efficienza."
         )
 
-    with col_preferenze:
-        st.subheader("❤️ Sensazioni e Stile")
-        feel_preference = st.select_slider(
-            "Che sensazione cerchi sotto il piede?",
-            options=["Massimo Cuscino (Morbida)", "Cuscino Protettivo", "Bilanciata", "Reattiva / Veloce", "Piatta / Secca (Max Spinta)"],
-            value="Bilanciata"
+    with col_sensazioni:
+        st.subheader("❤️ Sensazioni Richieste")
+        
+        # SLIDER DISACCOPPIATI: SHOCK (Protezione) vs DRIVE (Spinta/Reattività)
+        shock_preference = st.select_slider(
+            "Ammortizzazione e Protezione (Shock):",
+            options=["Minima", "Moderata", "Bilanciata", "Elevata", "Massima"],
+            value="Bilanciata",
+            help="Quanto vuoi che la scarpa assorba l'impatto (Dumping)."
         )
+        
+        drive_preference = st.select_slider(
+            "Reattività e Spinta (Drive/Energy):",
+            options=["Minima", "Moderata", "Bilanciata", "Elevata", "Massima"],
+            value="Bilanciata",
+            help="Quanto vuoi che la scarpa restituisca energia e spinga in avanti."
+        )
+        
         heel_pct = st.slider(
             "Percentuale di appoggio del tallone:",
             min_value=0, max_value=100, value=40, step=10,
@@ -106,33 +114,33 @@ if check_password():
         )
 
     # --- MOTORE DI TRADUZIONE (USER -> TECH) ---
-    map_run_type = {"Recupero / Easy": 0, "Lungo Lento": 1, "Allenamento Quotidiano": 2, "Tempo / Ripetute": 3, "Gara / PB": 4}
-    score_goal = map_run_type[run_type] 
+    map_goal = {"Recupero / Easy": 0, "Lungo Lento": 1, "Allenamento Quotidiano": 2, "Tempo / Ripetute": 3, "Gara / PB": 4}
+    score_goal = map_goal[run_type] 
 
-    map_feel = {"Massimo Cuscino (Morbida)": 0, "Cuscino Protettivo": 1, "Bilanciata": 2, "Reattiva / Veloce": 3, "Piatta / Secca (Max Spinta)": 4}
-    score_feel = map_feel[feel_preference] 
+    map_pref = {"Minima": 0, "Moderata": 1, "Bilanciata": 2, "Elevata": 3, "Massima": 4}
+    score_shock = map_pref[shock_preference]
+    score_drive = map_pref[drive_preference]
 
     # --- CALCOLO PESI AUTOMATICO ---
-    # Pesi base
-    w_shock, w_energy, w_flex, w_weight = 2.0, 2.0, 1.0, 1.0
+    # Inizializzazione pesi base
+    w_shock, w_energy, w_flex, w_weight = 1.0, 1.0, 1.0, 1.0
 
-    # Aggiustamento OBIETTIVO
-    w_shock  -= score_goal * 0.3
-    w_energy += score_goal * 0.8
-    w_flex   += score_goal * 0.6
+    # Ponderazione SHOCK/ENERGY/FLEX in base a PREFERENZE (Disaccoppiato)
+    # L'indice Drive è correlato a Energy/Flex, lo useremo come fattore principale per la spinta.
+    
+    # 1. Shock/Ammortizzazione (dipende solo da W_SHOCK)
+    w_shock = 0.5 + score_shock * 1.5
 
-    # Aggiustamento FEELING (Ora su 5 punti)
-    if score_feel == 0: # Massimo Cuscino
-        w_shock += 2.5; w_flex -= 1.0
-    elif score_feel == 1: # Cuscino Protettivo
-        w_shock += 1.0; w_energy -= 0.5
-    elif score_feel == 3: # Reattiva / Veloce
-        w_energy += 1.5; w_flex += 0.5
-    elif score_feel == 4: # Piatta / Secca
-        w_shock -= 1.5; w_flex += 2.0; w_energy += 1.0
-
-    # Aggiustamento PESO
+    # 2. Spinta (Aumenta W_ENERGY e W_FLEX in base a DRIVE preference)
+    w_energy = 0.5 + score_drive * 1.0
+    w_flex   = 0.5 + score_drive * 1.0
+    
+    # 3. Ponderazione Leggerezza
     w_weight = 0.5 + (weight_priority / 100.0) * 3.5
+
+    # 4. Aggiustamenti finali basati su OBIETTIVO (Il fattore Race è dominante)
+    w_energy += score_goal * 0.5 # Premia l'Energy per la Gara
+    w_flex   += score_goal * 0.4 # Premia la Rigidità per la Gara
 
     # Clamp e Normalizzazione
     w_shock, w_energy, w_flex, w_weight = max(0.1, w_shock), max(0.1, w_energy), max(0.1, w_flex), max(0.1, w_weight)
@@ -177,7 +185,6 @@ if check_password():
         min_price = df_filt[PRICE_COL].min()
         max_price = df_filt[PRICE_COL].max()
         
-        # Gestione NaN per il Budget Slider
         min_p = int(min_price) if not np.isnan(min_price) else 50
         max_p = int(max_price) if not np.isnan(max_price) else 300
         default_p = int(min_p + (max_p - min_p) * 0.75)
@@ -189,9 +196,15 @@ if check_password():
             bp = picks.iloc[0]
             with st.container(border=True):
                 k1, k2 = st.columns([3, 1])
-                k1.subheader(f"🏆 {bp['label']}")
-                k2.metric("MPI", f"{bp['MPI_B']}")
-                k2.write(f"{bp[PRICE_COL]:.0f} €")
+                with k1:
+                    st.subheader(f"🏆 {bp['marca']} {bp['modello']}")
+                    st.write(f"Best in Class (< {b_max}€)")
+                    if pd.notna(bp.get('versione')):
+                        st.caption(f"Versione: {int(bp['versione'])}")
+
+                with k2:
+                    st.metric("MPI", f"{bp['MPI_B']}")
+                    st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
         else:
             st.warning("Nessun risultato nel range di budget.")
     
