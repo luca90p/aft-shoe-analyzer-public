@@ -17,30 +17,22 @@ if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
     st.markdown("**Advanced Footwear Technology Analysis Tool**")
 
-    # --- EXPANDER METODOLOGIA (AGGIORNATO CON CITAZIONI) ---
+    # --- EXPANDERs (Documentazione) ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
-        L'algoritmo MPI-B integra evidenze scientifiche per valutare l'efficienza della calzatura.
+        **1. Costo Metabolico del Peso**
+        Ogni 100g extra aumentano il costo energetico dell'1%.
+        *Fonte:*
         
-        **1. Rigidità Longitudinale (Flex Index)**
-        Il database misura la **Forza (N)** necessaria per flettere la suola di 30°. Il punteggio segue una modellazione non lineare.
-        * **Logica:** Le scarpe da gara premiano la rigidità elevata; quelle da allenamento cercano un valore moderato per comfort.
-        * *Fonte:* **Rodrigo-Carranza et al. (2022).** *The effects of footwear midsole longitudinal bending stiffness on running economy...*
+        **2. Indice di Spinta Meccanica (Drive Index)**
+        Sinergia tra Piastra, Rocker e Rigidità.
+        *Fonte:*
         
-        **2. Costo Metabolico del Peso (Weight Efficiency)**
-        La funzione di penalità del peso si basa sull'osservazione che **ogni 100g di massa aggiuntiva aumentano il costo energetico dell'1%** (Decadimento esponenziale).
-        * *Fonte:* **Teunissen, Grabowski & Kram (2007).** *Effects of independently altering body weight and body mass on the metabolic cost of running.*
-        
-        **3. Indice di Spinta Meccanica (Drive Index)**
-        La performance deriva dall'interazione ("Teeter-Totter effect") tra la piastra, la geometria Rocker e la rigidità longitudinale. La schiuma fornisce il contributo metabolico primario.
-        * *Fonte:* **Ghanbari et al. (2025).** *Effects of the curved carbon fibre plate and PEBA foam on the energy cost of running...*
-        
-        **4. Stack Height e Stabilità**
-        Lo stack alto (>40mm) può compromettere la stabilità biomeccanica se non adeguatamente compensato.
-        * *Fonte:* **Kettner et al. (2025).** *The effects of running shoe stack height on running style and stability...*
+        **3. Rigidità Longitudinale (Flex Index)**
+        Range misurato: 5N (Soft) - 40N (Stiff).
+        *Fonte:*
         """)
 
-    # --- EXPANDER FORMULE MATEMATICHE ---
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
         Il calcolo del punteggio totale MPI-B si basa su una somma pesata di 5 indici normalizzati $[0, 1]$.
@@ -156,8 +148,12 @@ if check_password():
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
+    def safe_norm(s): 
+        s = pd.to_numeric(s, errors='coerce').fillna(s.mean())
+        return (s - s.min()) / max(s.max() - s.min(), 1e-9)
+
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
-    df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
+    df_filt["EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
     df_filt.loc[:, "MPI_B"] = (
         (w_shock * df_filt["ShockIndex_calc"] + 
@@ -173,9 +169,10 @@ if check_password():
     else:
         df_filt["ValueIndex"] = 0.0
 
-    # --- BEST PICK ---
+    # --- BEST PICK (Podio) ---
     st.markdown("---")
-    st.header("💡 Best Pick")
+    st.header("💡 Best Pick: Il Podio per il tuo Budget")
+    
     if PRICE_COL:
         min_price = df_filt[PRICE_COL].min()
         max_price = df_filt[PRICE_COL].max()
@@ -187,33 +184,36 @@ if check_password():
         col_budget, col_best = st.columns([1, 2])
 
         with col_budget:
-            budget_max = st.slider("Budget Max (€)", min_p, max_p, default_p, 5)
+            budget_max = st.slider("Budget Max (€):", min_p, max_p, default_p, 5)
         
         df_budget = df_filt[df_filt[PRICE_COL] <= budget_max].copy()
         
         with col_best:
             if not df_budget.empty:
-                bp = df_budget.sort_values(by="MPI_B", ascending=False).iloc[0]
-                best_pick_label = bp['label']
+                top_picks = df_budget.sort_values(by="MPI_B", ascending=False).head(3)
+                rank_labels = ["🥇 1° Posto", "🥈 2° Posto", "🥉 3° Posto"]
                 
-                with st.container(border=True):
-                    k1, k2 = st.columns([3, 1])
-                    with k1:
-                        st.subheader(f"🏆 {bp['marca']} {bp['modello']}")
-                        st.write(f"Best in Class (< {budget_max}€)")
-                        if pd.notna(bp.get('versione')):
-                            st.caption(f"Versione: {int(bp['versione'])}")
-
-                    with k2:
-                        st.metric("MPI Score", f"{bp['MPI_B']:.3f}")
-                        st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
+                cols_podium = st.columns(3)
+                
+                for i, (idx, bp) in enumerate(top_picks.iterrows()):
+                    with cols_podium[i]:
+                        with st.container(border=True):
+                            st.markdown(f"#### {rank_labels[i]}")
+                            st.subheader(f"{bp['marca']} {bp['modello']}")
+                            
+                            if pd.notna(bp.get('versione')):
+                                st.caption(f"Versione: {int(bp['versione'])}")
+                            
+                            st.write(f"MPI Score: **{bp['MPI_B']:.3f}**")
+                            st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
+                            
+                            if pd.notna(bp.get('ValueIndex')):
+                                stars = render_stars(bp['ValueIndex'])
+                                st.caption(f"Value: {stars}")
             else:
                 st.warning("Nessun risultato nel range di budget.")
-
-    # ============================================
-    # 2. ANALISI MERCATO
-    # ============================================
-
+    
+    # --- STEP 2: ANALISI MERCATO ---
     st.markdown("---")
     st.header("2. Analisi Comparativa di Mercato")
     
@@ -221,16 +221,17 @@ if check_password():
         df_val_sorted = df_filt.sort_values("ValueIndex", ascending=False)
         models = df_val_sorted['label'].tolist()
         
-        # Gestione Stato Selezione
-        best_pick_label = best_pick_label if 'best_pick_label' in locals() else models[0]
+        # 1. Trova l'etichetta da usare come default
+        best_pick_label = top_picks.iloc[0]['label'] if 'top_picks' in locals() and not top_picks.empty else models[0]
 
         if 'selected_point_key' not in st.session_state:
             st.session_state['selected_point_key'] = best_pick_label
         
-        # Aggiorna lo stato se il best pick cambia
+        # 2. Aggiorna lo stato se il best pick cambia
         if best_pick_label != st.session_state['selected_point_key'] and best_pick_label in models:
              st.session_state['selected_point_key'] = best_pick_label
-
+        
+        # 3. Controllo consistenza (fallback)
         curr_sel = st.session_state['selected_point_key']
         if curr_sel not in models:
             curr_sel = models[0]
@@ -295,4 +296,3 @@ if check_password():
             cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StackFactor", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
             if PRICE_COL: cols_ctrl.append(PRICE_COL)
             st.dataframe(df_filt[[c for c in cols_ctrl if c in df_filt.columns]], use_container_width=True)
-
