@@ -5,10 +5,10 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Import dai moduli personalizzati
+# Importa le funzioni dai moduli personalizzati (CORREZIONE APPLICATA QUI)
 from aft_core import trova_scarpe_simili
-from aft_plots import plot_radar_comparison_plotly_styled, render_stars
-from aft_utils import check_password, load_and_process, safe_norm
+from aft_plots import plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled, render_stars # <-- plot_mpi_vs_price_plotly AGGIUNTO
+from aft_utils import check_password, load_and_process, safe_norm 
 
 # =========================
 #   CONFIGURAZIONE E LOGIN
@@ -146,18 +146,14 @@ if check_password():
 
     with st.expander(f"⚙️ Pesi Tecnici Applicati"):
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Ammortizz.", f"{pct_shock:.0f} %")
-        c2.metric("Ritorno Energia", f"{pct_energy:.0f} %")
-        c3.metric("Spinta/Rigidità", f"{pct_flex:.0f} %")
-        c4.metric("Leggerezza", f"{pct_weight:.0f} %")
+        c1.metric("Ammortizz.", f"{pct_shock:.0f}%")
+        c2.metric("Ritorno Energia", f"{pct_energy:.0f}%")
+        c3.metric("Spinta/Rigidità", f"{pct_flex:.0f}%")
+        c4.metric("Leggerezza", f"{pct_weight:.0f}%")
 
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
-    def safe_norm(s): 
-        s = pd.to_numeric(s, errors='coerce').fillna(s.mean())
-        return (s - s.min()) / max(s.max() - s.min(), 1e-9)
-
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
@@ -180,7 +176,7 @@ if check_password():
     # ============================================
 
     st.markdown("---")
-    st.header("💡 Best Pick: Il Leader per il tuo Budget")
+    st.header("💡 Best Pick: Il Podio per il tuo Budget")
     
     best_pick_label = None
 
@@ -203,24 +199,38 @@ if check_password():
             if not df_budget.empty:
                 
                 # Trova il Best Pick (Leader)
-                bp = df_budget.sort_values(by="MPI_B", ascending=False).iloc[0]
-                best_pick_label = bp['label']
+                top_picks_all = df_budget.sort_values(by="MPI_B", ascending=False)
+                top_pick_label = top_picks_all.iloc[0]['label']
                 
-                with st.container(border=True):
-                    k1, k2 = st.columns([3, 1])
-                    with k1:
-                        st.subheader(f"🏆 {bp['marca']} {bp['modello']}")
-                        st.write(f"Best in Class (< {budget_max}€)")
-                        if pd.notna(bp.get('versione')):
-                            st.caption(f"Versione: {int(bp['versione'])}")
-
-                    with k2:
-                        st.metric("MPI Score", f"{bp['MPI_B']:.3f}")
-                        st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
-                        
-                        if pd.notna(bp.get('ValueIndex')):
-                            stars = render_stars(bp['ValueIndex'])
-                            st.caption(f"Value: {stars}")
+                # Calcola i vicini biomeccanici del Leader per le posizioni 2 e 3
+                cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
+                simili_raw = trova_scarpe_simili(df_budget, top_pick_label, cols_simil, n_simili=3)
+                
+                # Costruisci il Podio: Leader (Max MPI) + 2 Più Simili al Leader
+                top_picks = pd.concat([top_picks_all[top_picks_all['label'] == top_pick_label].head(1), simili_raw.head(2)], ignore_index=True)
+                
+                best_pick_label = top_picks.iloc[0]['label']
+                rank_labels = ["🥇 Leader", "🥈 Alternativa 1", "🥉 Alternativa 2"]
+                
+                cols_podium = st.columns(3)
+                
+                for i, (idx, bp) in enumerate(top_picks.iterrows()):
+                    if i >= 3: break
+                    
+                    with cols_podium[i]:
+                        with st.container(border=True):
+                            st.markdown(f"#### {rank_labels[i]}")
+                            st.subheader(f"{bp['marca']} {bp['modello']}")
+                            
+                            if pd.notna(bp.get('versione')):
+                                st.caption(f"Versione: {int(bp['versione'])}")
+                            
+                            st.write(f"MPI Score: **{bp['MPI_B']:.3f}**")
+                            st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
+                            
+                            if pd.notna(bp.get('ValueIndex')):
+                                stars = render_stars(bp['ValueIndex'])
+                                st.caption(f"Value: {stars}")
             else:
                 st.warning("Nessun risultato nel range di budget.")
 
@@ -289,12 +299,9 @@ if check_password():
         # --- STEP 4: SIMILITUDINE ---
         st.markdown("---")
         st.header("4. Similitudine & Radar")
-        
-        # 1. Usa la selezione corrente come target per la similarità
-        target_label = sel_input
         cols_sim = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
-        simili = trova_scarpe_simili(df_filt, target_label, cols_sim) # trova i 3 più vicini al target
-
+        simili = trova_scarpe_simili(df_filt, sel_input, cols_sim)
+        
         if not simili.empty:
             cc = st.columns(3)
             for i, (_, s_row) in enumerate(simili.iterrows()):
@@ -303,7 +310,7 @@ if check_password():
                         st.markdown(f"**{s_row['label']}**")
                         st.caption(f"Dist: {s_row['distanza_similitudine']:.3f}")
             
-            df_rad = pd.concat([df_filt[df_filt['label']==target_label], simili], ignore_index=True)
+            df_rad = pd.concat([df_filt[df_filt['label']==sel_input], simili], ignore_index=True)
             st.plotly_chart(plot_radar_comparison_plotly_styled(df_rad, cols_sim), use_container_width=True)
         else:
             st.warning("Nessun dato con i filtri attuali.")
