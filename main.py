@@ -5,10 +5,10 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Import dai moduli personalizzati
+# Importa le funzioni dai moduli personalizzati (RISOLVE IL NAMEERROR)
 from aft_core import trova_scarpe_simili
-from aft_plots import plot_radar_comparison_plotly_styled, render_stars
-from aft_utils import check_password, load_and_process, safe_norm
+from aft_plots import plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled, render_stars
+from aft_utils import check_password, load_and_process, safe_norm # <-- SAFE_NORM IMPORTATO QUI
 
 # =========================
 #   CONFIGURAZIONE E LOGIN
@@ -38,10 +38,14 @@ if check_password():
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
         Il calcolo del punteggio totale MPI-B si basa su una somma pesata di 5 indici normalizzati $[0, 1]$.
-        
+
         ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
         * **Race:** Sigmoide centrata su 18N.
         * **Daily:** Gaussiana centrata su 12N.
+
+        ### 2. Drive Index ($I_{Drive}$)
+        Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
+        $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiffness}) + 0.4 \cdot S_{Foam} $$
         """)
 
     # --- CARICAMENTO DATI ---
@@ -76,6 +80,7 @@ if check_password():
     st.header("1. Parametrizzazione Performance (MPI)")
     st.info("Definisci i criteri per calcolare l'indice MPI personalizzato in base alle tue esigenze.")
 
+    # --- INTERFACCIA UTENTE SEMPLIFICATA ---
     col_obiettivi, col_preferenze = st.columns(2)
 
     with col_obiettivi:
@@ -137,14 +142,15 @@ if check_password():
 
     with st.expander(f"⚙️ Pesi Tecnici Applicati"):
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Ammortizz.", f"{pct_shock:.0f} %")
-        c2.metric("Ritorno Energia", f"{pct_energy:.0f} %")
-        c3.metric("Spinta/Rigidità", f"{pct_flex:.0f} %")
-        c4.metric("Leggerezza", f"{pct_weight:.0f} %")
+        c1.metric("Ammortizz.", f"{pct_shock:.0f}%")
+        c2.metric("Ritorno Energia", f"{pct_energy:.0f}%")
+        c3.metric("Spinta/Rigidità", f"{pct_flex:.0f}%")
+        c4.metric("Leggerezza", f"{pct_weight:.0f}%")
 
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
+    # Ricalcolo dinamico indici parziali (Shock/Energy)
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
@@ -162,10 +168,7 @@ if check_password():
     else:
         df_filt["ValueIndex"] = 0.0
 
-    # ============================================
-    # 1.5 BEST PICK (UNIFIED LOGIC)
-    # ============================================
-
+    # --- BEST PICK (Podio) ---
     st.markdown("---")
     st.header("💡 Best Pick: Il Podio per il tuo Budget")
     
@@ -188,26 +191,21 @@ if check_password():
         
         with col_best:
             if not df_budget.empty:
-                
-                # 1. Trova il BEST PICK (Modello #1)
                 top_picks_all = df_budget.sort_values(by="MPI_B", ascending=False)
                 top_pick_label = top_picks_all.iloc[0]['label']
                 
-                # 2. Trova i vicini biomeccanici del Best Pick (#2 e #3)
                 cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
-                # Trova i 3 più vicini (che include il target stesso se non escluso)
                 simili_raw = trova_scarpe_simili(df_budget, top_pick_label, cols_simil, n_simili=3)
                 
-                # Rimuoviamo il target se è stato accidentalmente incluso e prendiamo i Top 3
                 top_picks = pd.concat([top_picks_all[top_picks_all['label'] == top_pick_label].head(1), simili_raw.head(2)], ignore_index=True)
                 
-                best_pick_label = top_picks.iloc[0]['label'] # Sarà sempre il modello #1
+                best_pick_label = top_picks.iloc[0]['label']
                 rank_labels = ["🥇 1° Posto", "🥈 2° Posto", "🥉 3° Posto"]
                 
                 cols_podium = st.columns(3)
                 
                 for i, (idx, bp) in enumerate(top_picks.iterrows()):
-                    if i >= 3: break # Limita a 3 per il podio
+                    if i >= 3: break
                     
                     with cols_podium[i]:
                         with st.container(border=True):
@@ -238,10 +236,17 @@ if check_password():
         models = df_val_sorted['label'].tolist()
         
         # 1. Aggiorna lo stato se il Best Pick è stato trovato
-        if 'best_pick_label' in locals() and best_pick_label and best_pick_label in models:
-            st.session_state['selected_point_key'] = best_pick_label
+        best_pick_label_check = best_pick_label if 'best_pick_label' in locals() and best_pick_label and best_pick_label in models else models[0]
+
+        if 'selected_point_key' not in st.session_state:
+            st.session_state['selected_point_key'] = best_pick_label_check
         
-        # 2. Controllo consistenza (fallback)
+        # 2. Aggiorna lo stato se il best pick è diverso dal target attuale
+        if best_pick_label_check != st.session_state['selected_point_key']:
+             st.session_state['selected_point_key'] = best_pick_label_check
+             st.rerun() 
+
+        # 3. Controllo consistenza (fallback)
         curr_sel = st.session_state['selected_point_key']
         if curr_sel not in models:
             curr_sel = models[0]
