@@ -7,8 +7,8 @@ import plotly.graph_objects as go
 
 # Import dai moduli personalizzati
 from aft_core import trova_scarpe_simili
-from aft_plots import plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled, render_stars
-from aft_utils import check_password, load_and_process, safe_norm # safe_norm importato
+from aft_plots import plot_radar_comparison_plotly_styled, render_stars
+from aft_utils import check_password, load_and_process, safe_norm
 
 # =========================
 #   CONFIGURAZIONE E LOGIN
@@ -22,22 +22,17 @@ if check_password():
     # --- EXPANDERs (Documentazione) ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
-        **1. Rigidità Longitudinale (Flex Index)**
-        Il database misura la **Forza (N)** necessaria per flettere la suola di 30°. Il punteggio segue una modellazione non lineare.
-        * **Logica:** Le scarpe da gara premiano la rigidità elevata; quelle da allenamento cercano un valore moderato per comfort.
-        * *Fonte:* **Rodrigo-Carranza et al. (2022).** *The effects of footwear midsole longitudinal bending stiffness on running economy...*
+        **1. Costo Metabolico del Peso**
+        Ogni 100g extra aumentano il costo energetico dell'1%.
+        *Fonte:*
         
-        **2. Costo Metabolico del Peso (Weight Efficiency)**
-        *Ogni 100g di massa aggiuntiva aumentano il costo energetico dell'1%.* La funzione di penalità del peso segue un decadimento esponenziale.
-        * *Fonte:* **Teunissen, Grabowski & Kram (2007).** *Effects of independently altering body weight and body mass on the metabolic cost of running.*
+        **2. Indice di Spinta Meccanica (Drive Index)**
+        Sinergia tra Piastra, Rocker e Rigidità.
+        *Fonte:*
         
-        **3. Indice di Spinta Meccanica (Drive Index)**
-        La performance deriva dall'interazione ("Teeter-Totter effect") tra la piastra, la geometria Rocker e la rigidità.
-        * *Fonte:* **Ghanbari et al. (2025).** *Effects of the curved carbon fibre plate and PEBA foam on the energy cost of running...*
-        
-        **4. Stack Height e Stabilità**
-        Lo stack alto (>40mm) può compromettere la stabilità biomeccanica se non adeguatamente compensato.
-        * *Fonte:* **Kettner et al. (2025).** *The effects of running shoe stack height on running style and stability...*
+        **3. Rigidità Longitudinale (Flex Index)**
+        Range misurato: 5N (Soft) - 40N (Stiff).
+        *Fonte:*
         """)
 
     with st.expander("📐 Formule Matematiche del Modello AFT"):
@@ -146,10 +141,10 @@ if check_password():
 
     with st.expander(f"⚙️ Pesi Tecnici Applicati"):
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Ammortizz.", f"{pct_shock:.0f}%")
-        c2.metric("Ritorno Energia", f"{pct_energy:.0f}%")
-        c3.metric("Spinta/Rigidità", f"{pct_flex:.0f}%")
-        c4.metric("Leggerezza", f"{pct_weight:.0f}%")
+        c1.metric("Ammortizz.", f"{pct_shock:.0f} %")
+        c2.metric("Ritorno Energia", f"{pct_energy:.0f} %")
+        c3.metric("Spinta/Rigidità", f"{pct_flex:.0f} %")
+        c4.metric("Leggerezza", f"{pct_weight:.0f} %")
 
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
