@@ -5,15 +5,15 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Import dai moduli personalizzati
+# Importa le funzioni dai moduli personalizzati (RISOLVE IL NAMEERROR)
 from aft_core import trova_scarpe_simili
-from aft_plots import plot_radar_comparison_plotly_styled, render_stars
-from aft_utils import check_password, load_and_process, safe_norm
+from aft_plots import plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled, render_stars
+from aft_utils import check_password, load_and_process, safe_norm # <-- SAFE_NORM IMPORTATO QUI
 
 # =========================
 #   CONFIGURAZIONE E LOGIN
 # =========================
-st.set_page_config(page_title="AFT Analyst", layout="wide") # <--- CORREZIONE APPLICATA QUI
+st.set_page_config(page_title="AFT Analyst", layout="wide")
 
 if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
@@ -48,9 +48,7 @@ if check_password():
 
         ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
         * **Race:** Sigmoide centrata su 18N.
-          $$ I_{Flex, Race} = \frac{1}{1 + e^{-(Flex - 18)/2.5}} $$
         * **Daily:** Gaussiana centrata su 12N.
-          $$ I_{Flex, Daily} = e^{-\frac{(Flex - 12)^2}{2 \cdot 5^2}} $$
 
         ### 2. Drive Index ($I_{Drive}$)
         Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
@@ -156,7 +154,8 @@ if check_password():
         c4.metric("Leggerezza", f"{pct_weight:.0f}%")
 
     # --- CALCOLO MPI REALE ---
-    w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
+    w_mid = 1.0 - (heel_pct / 100.0)
+    w_heel_val = heel_pct / 100.0
     
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
@@ -204,7 +203,6 @@ if check_password():
                 cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
                 simili_raw = trova_scarpe_simili(df_budget, top_pick_label, cols_simil, n_simili=3)
                 
-                # Unifica il Best Pick (Modello #1) e i 2 modelli più simili al suo profilo biomeccanico
                 top_picks = pd.concat([top_picks_all[top_picks_all['label'] == top_pick_label].head(1), simili_raw.head(2)], ignore_index=True)
                 
                 best_pick_label = top_picks.iloc[0]['label']
