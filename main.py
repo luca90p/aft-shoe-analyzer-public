@@ -5,15 +5,15 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Importa le funzioni dai moduli personalizzati (RISOLVE IL NAMEERROR)
+# Import dai moduli personalizzati
 from aft_core import trova_scarpe_simili
-from aft_plots import plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled, render_stars
-from aft_utils import check_password, load_and_process, safe_norm # <-- SAFE_NORM IMPORTATO QUI
+from aft_plots import plot_radar_comparison_plotly_styled, render_stars
+from aft_utils import check_password, load_and_process, safe_norm
 
 # =========================
 #   CONFIGURAZIONE E LOGIN
 # =========================
-st.set_page_config(page_title="AFT Analyst", layout="wide")
+st.set_page_config(page_title="AFT Analyst", layout="wide") # <--- CORREZIONE APPLICATA QUI
 
 if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
@@ -22,17 +22,24 @@ if check_password():
     # --- EXPANDERs (Documentazione) ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
-        **1. Costo Metabolico del Peso**
-        Ogni 100g extra aumentano il costo energetico dell'1%.
-        *Fonte:*
+        L'algoritmo MPI-B integra evidenze scientifiche per valutare l'efficienza della calzatura.
         
-        **2. Indice di Spinta Meccanica (Drive Index)**
-        Sinergia tra Piastra, Rocker e Rigidità.
-        *Fonte:*
+        **1. Rigidità Longitudinale (Flex Index)**
+        Il database misura la **Forza (N)** necessaria per flettere la suola di 30°. Il punteggio segue una modellazione non lineare.
+        * **Logica:** Le scarpe da gara premiano la rigidità elevata; quelle da allenamento cercano un valore moderato per comfort.
+        * *Fonte:* **Rodrigo-Carranza et al. (2022).** *The effects of footwear midsole longitudinal bending stiffness on running economy...*
         
-        **3. Rigidità Longitudinale (Flex Index)**
-        Range misurato: 5N (Soft) - 40N (Stiff).
-        *Fonte:*
+        **2. Costo Metabolico del Peso (Weight Efficiency)**
+        *Ogni 100g di massa aggiuntiva aumentano il costo energetico dell'1%.* La funzione di penalità del peso segue un decadimento esponenziale.
+        * *Fonte:* **Teunissen, Grabowski & Kram (2007).** *Effects of independently altering body weight and body mass on the metabolic cost of running.*
+        
+        **3. Indice di Spinta Meccanica (Drive Index)**
+        La performance deriva dall'interazione ("Teeter-Totter effect") tra la piastra, la geometria Rocker e la rigidità.
+        * *Fonte:* **Ghanbari et al. (2025).** *Effects of the curved carbon fibre plate and PEBA foam on the energy cost of running...*
+        
+        **4. Stack Height e Stabilità**
+        Lo stack alto (>40mm) può compromettere la stabilità biomeccanica se non adeguatamente compensato.
+        * *Fonte:* **Kettner et al. (2025).** *The effects of running shoe stack height on running style and stability...*
         """)
 
     with st.expander("📐 Formule Matematiche del Modello AFT"):
@@ -41,7 +48,9 @@ if check_password():
 
         ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
         * **Race:** Sigmoide centrata su 18N.
+          $$ I_{Flex, Race} = \frac{1}{1 + e^{-(Flex - 18)/2.5}} $$
         * **Daily:** Gaussiana centrata su 12N.
+          $$ I_{Flex, Daily} = e^{-\frac{(Flex - 12)^2}{2 \cdot 5^2}} $$
 
         ### 2. Drive Index ($I_{Drive}$)
         Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
@@ -80,7 +89,6 @@ if check_password():
     st.header("1. Parametrizzazione Performance (MPI)")
     st.info("Definisci i criteri per calcolare l'indice MPI personalizzato in base alle tue esigenze.")
 
-    # --- INTERFACCIA UTENTE SEMPLIFICATA ---
     col_obiettivi, col_preferenze = st.columns(2)
 
     with col_obiettivi:
@@ -150,7 +158,6 @@ if check_password():
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
-    # Ricalcolo dinamico indici parziali (Shock/Energy)
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
@@ -197,6 +204,7 @@ if check_password():
                 cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
                 simili_raw = trova_scarpe_simili(df_budget, top_pick_label, cols_simil, n_simili=3)
                 
+                # Unifica il Best Pick (Modello #1) e i 2 modelli più simili al suo profilo biomeccanico
                 top_picks = pd.concat([top_picks_all[top_picks_all['label'] == top_pick_label].head(1), simili_raw.head(2)], ignore_index=True)
                 
                 best_pick_label = top_picks.iloc[0]['label']
