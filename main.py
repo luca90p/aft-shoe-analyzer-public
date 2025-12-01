@@ -11,84 +11,9 @@ from aft_plots import plot_radar_comparison_plotly_styled, render_stars
 from aft_utils import check_password, load_and_process, safe_norm
 
 # =========================
-#   CONFIGURAZIONE PAGINA
+#   CONFIGURAZIONE E LOGIN
 # =========================
 st.set_page_config(page_title="AFT Analyst", layout="wide")
-
-# =========================
-#   FUNZIONE PLOT AGGIORNATA
-# =========================
-
-def plot_mpi_vs_price_plotly(df_val, price_col, podium_labels):
-    """ Scatter plot MPI-B vs Prezzo con ranking del podio. """
-    
-    # 1. Mappa le etichette ai ranghi del podio (1, 2, 3) o 0 (altri)
-    def map_rank(label):
-        if len(podium_labels) > 0 and label == podium_labels[0]: return '1 - Oro (Target)'
-        if len(podium_labels) > 1 and label == podium_labels[1]: return '2 - Argento'
-        if len(podium_labels) > 2 and label == podium_labels[2]: return '3 - Bronzo'
-        return '4 - Database'
-    
-    df_val['Podium_Rank'] = df_val['label'].apply(map_rank)
-    
-    # 2. Ordinamento Z-Order: Disegna prima il Database, poi i ranghi (dal Bronzo all'Oro)
-    # L'ordinamento crescente di 'Podium_Rank' (che inizia con 1, 2, 3, 4) garantisce che il Database vada per primo.
-    df_val = df_val.sort_values(by='Podium_Rank', ascending=True).reset_index(drop=True)
-    
-    # 3. Testo Hover
-    df_val['hover_text'] = df_val.apply(
-        lambda row: f"<b>{row['label']}</b> ({row['Podium_Rank'].split()[0]})<br>"
-                    f"MPI-B: {row['MPI_B']:.3f}<br>"
-                    f"Costo: {row[price_col]:.0f}€<br>"
-                    f"Value Index: {row['ValueIndex']:.3f}", axis=1
-    )
-    
-    # DEFINIZIONE COLORI DISCRETI
-    color_map = {
-        '1 - Oro (Target)': '#FFD700',   # Gold
-        '2 - Argento': '#C0C0C0',       # Silver
-        '3 - Bronzo': '#CD7F32',        # Bronze
-        '4 - Database': '#A9A9A9'       # Gray
-    }
-
-    fig = px.scatter(
-        df_val,
-        x=price_col,
-        y="MPI_B",
-        color='Podium_Rank', # Colore in base al Rank
-        size='ValueIndex',
-        size_max=25, 
-        hover_name='hover_text',
-        color_discrete_map=color_map,
-        labels={price_col: f'{price_col} [€]', "MPI_B": "Indice MPI-B"},
-        title="Analisi Costo-Efficienza (Podio Evidenziato)"
-    )
-
-    # 4. Styling per visibilità (Solo il pallino d'Oro ha un bordo più spesso)
-    fig.update_traces(
-        marker=dict(
-            opacity=0.8,
-            # Bordo spesso per i primi tre posti, sottile per gli altri
-            line=dict(width=df_val['Podium_Rank'].apply(lambda x: 2 if x != '4 - Database' else 0.5), 
-                      color=df_val['Podium_Rank'].apply(lambda x: 'black' if x != '4 - Database' else '#A9A9A9')),
-        ),
-        selector=dict(mode='markers')
-    )
-    
-    fig.update_layout(
-        hovermode="closest",
-        yaxis=dict(title="Performance Index (MPI)", range=[0, 1.05]),
-        xaxis=dict(title="Prezzo di Listino (€)"),
-        legend_title_text='Legenda',
-        margin=dict(l=20, r=20, t=40, b=20)
-    )
-    
-    return fig
-
-
-# =========================
-#   MAIN APP LOGIC
-# =========================
 
 if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
@@ -113,14 +38,10 @@ if check_password():
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
         Il calcolo del punteggio totale MPI-B si basa su una somma pesata di 5 indici normalizzati $[0, 1]$.
-
+        
         ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
         * **Race:** Sigmoide centrata su 18N.
         * **Daily:** Gaussiana centrata su 12N.
-
-        ### 2. Drive Index ($I_{Drive}$)
-        Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
-        $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiffness}) + 0.4 \cdot S_{Foam} $$
         """)
 
     # --- CARICAMENTO DATI ---
@@ -216,18 +137,14 @@ if check_password():
 
     with st.expander(f"⚙️ Pesi Tecnici Applicati"):
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Ammortizz.", f"{pct_shock:.0f}%")
-        c2.metric("Ritorno Energia", f"{pct_energy:.0f}%")
-        c3.metric("Spinta/Rigidità", f"{pct_flex:.0f}%")
-        c4.metric("Leggerezza", f"{pct_weight:.0f}%")
+        c1.metric("Ammortizz.", f"{pct_shock:.0f} %")
+        c2.metric("Ritorno Energia", f"{pct_energy:.0f} %")
+        c3.metric("Spinta/Rigidità", f"{pct_flex:.0f} %")
+        c4.metric("Leggerezza", f"{pct_weight:.0f} %")
 
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
-    def safe_norm(s): 
-        s = pd.to_numeric(s, errors='coerce').fillna(s.mean())
-        return (s - s.min()) / max(s.max() - s.min(), 1e-9)
-
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
@@ -245,7 +162,10 @@ if check_password():
     else:
         df_filt["ValueIndex"] = 0.0
 
-    # --- BEST PICK (Podio) ---
+    # ============================================
+    # 1.5 BEST PICK (UNIFIED LOGIC)
+    # ============================================
+
     st.markdown("---")
     st.header("💡 Best Pick: Il Podio per il tuo Budget")
     
@@ -268,13 +188,27 @@ if check_password():
         
         with col_best:
             if not df_budget.empty:
-                top_picks = df_budget.sort_values(by="MPI_B", ascending=False).head(3)
-                best_pick_label = top_picks.iloc[0]['label']
+                
+                # 1. Trova il BEST PICK (Modello #1)
+                top_picks_all = df_budget.sort_values(by="MPI_B", ascending=False)
+                top_pick_label = top_picks_all.iloc[0]['label']
+                
+                # 2. Trova i vicini biomeccanici del Best Pick (#2 e #3)
+                cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
+                # Trova i 3 più vicini (che include il target stesso se non escluso)
+                simili_raw = trova_scarpe_simili(df_budget, top_pick_label, cols_simil, n_simili=3)
+                
+                # Rimuoviamo il target se è stato accidentalmente incluso e prendiamo i Top 3
+                top_picks = pd.concat([top_picks_all[top_picks_all['label'] == top_pick_label].head(1), simili_raw.head(2)], ignore_index=True)
+                
+                best_pick_label = top_picks.iloc[0]['label'] # Sarà sempre il modello #1
                 rank_labels = ["🥇 1° Posto", "🥈 2° Posto", "🥉 3° Posto"]
                 
                 cols_podium = st.columns(3)
                 
                 for i, (idx, bp) in enumerate(top_picks.iterrows()):
+                    if i >= 3: break # Limita a 3 per il podio
+                    
                     with cols_podium[i]:
                         with st.container(border=True):
                             st.markdown(f"#### {rank_labels[i]}")
@@ -303,18 +237,11 @@ if check_password():
         df_val_sorted = df_filt.sort_values("ValueIndex", ascending=False)
         models = df_val_sorted['label'].tolist()
         
-        # 1. Trova l'etichetta da usare come default
-        best_pick_label_check = best_pick_label if 'best_pick_label' in locals() and best_pick_label in models else models[0]
-
-        if 'selected_point_key' not in st.session_state:
-            st.session_state['selected_point_key'] = best_pick_label_check
+        # 1. Aggiorna lo stato se il Best Pick è stato trovato
+        if 'best_pick_label' in locals() and best_pick_label and best_pick_label in models:
+            st.session_state['selected_point_key'] = best_pick_label
         
-        # 2. Aggiorna lo stato se il best pick è diverso dal target attuale
-        if best_pick_label_check != st.session_state['selected_point_key']:
-             st.session_state['selected_point_key'] = best_pick_label_check
-             st.rerun() 
-
-        # 3. Controllo consistenza (fallback)
+        # 2. Controllo consistenza (fallback)
         curr_sel = st.session_state['selected_point_key']
         if curr_sel not in models:
             curr_sel = models[0]
