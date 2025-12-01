@@ -5,10 +5,10 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Importa le funzioni dai moduli personalizzati (RISOLVE IL NAMEERROR)
+# Import dai moduli personalizzati
 from aft_core import trova_scarpe_simili
 from aft_plots import plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled, render_stars
-from aft_utils import check_password, load_and_process, safe_norm # <-- SAFE_NORM IMPORTATO QUI
+from aft_utils import check_password, load_and_process, safe_norm # safe_norm importato
 
 # =========================
 #   CONFIGURAZIONE E LOGIN
@@ -22,8 +22,6 @@ if check_password():
     # --- EXPANDERs (Documentazione) ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
-        L'algoritmo MPI-B integra evidenze scientifiche per valutare l'efficienza della calzatura.
-        
         **1. Rigidità Longitudinale (Flex Index)**
         Il database misura la **Forza (N)** necessaria per flettere la suola di 30°. Il punteggio segue una modellazione non lineare.
         * **Logica:** Le scarpe da gara premiano la rigidità elevata; quelle da allenamento cercano un valore moderato per comfort.
@@ -154,8 +152,7 @@ if check_password():
         c4.metric("Leggerezza", f"{pct_weight:.0f}%")
 
     # --- CALCOLO MPI REALE ---
-    w_mid = 1.0 - (heel_pct / 100.0)
-    w_heel_val = heel_pct / 100.0
+    w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
@@ -174,7 +171,10 @@ if check_password():
     else:
         df_filt["ValueIndex"] = 0.0
 
-    # --- BEST PICK (Podio) ---
+    # ============================================
+    # 1.5 BEST PICK (UNIFIED LOGIC)
+    # ============================================
+
     st.markdown("---")
     st.header("💡 Best Pick: Il Podio per il tuo Budget")
     
@@ -197,12 +197,16 @@ if check_password():
         
         with col_best:
             if not df_budget.empty:
+                
+                # 1. Trova il BEST PICK (Modello #1)
                 top_picks_all = df_budget.sort_values(by="MPI_B", ascending=False)
                 top_pick_label = top_picks_all.iloc[0]['label']
                 
+                # 2. Trova i vicini biomeccanici del Best Pick (#2 e #3)
                 cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
                 simili_raw = trova_scarpe_simili(df_budget, top_pick_label, cols_simil, n_simili=3)
                 
+                # Unifica il Best Pick (Modello #1) e i 2 modelli più simili
                 top_picks = pd.concat([top_picks_all[top_picks_all['label'] == top_pick_label].head(1), simili_raw.head(2)], ignore_index=True)
                 
                 best_pick_label = top_picks.iloc[0]['label']
