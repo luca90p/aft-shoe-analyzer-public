@@ -6,7 +6,7 @@ import numpy as np
 # Import dai moduli personalizzati
 from aft_core import trova_scarpe_simili
 from aft_plots import plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled, render_stars
-from aft_utils import check_password, load_and_process, safe_norm
+from aft_utils import check_password, load_and_process, safe_norm # safe_norm importata qui
 
 # =========================
 #   CONFIGURAZIONE E LOGIN
@@ -22,15 +22,15 @@ if check_password():
         st.markdown("""
         **1. Costo Metabolico del Peso**
         Ogni 100g extra aumentano il costo energetico dell'1%.
-        *Fonte:* [cite: metabolic cost of running, body weight influence.pdf]
+        *Fonte:*
         
         **2. Indice di Spinta Meccanica (Drive Index)**
         Sinergia tra Piastra, Rocker e Rigidità.
-        *Fonte:* [cite: Effects of the curved carbon fibre plate and PEBA foam on the energycost of running and muscle activation.pdf]
+        *Fonte:*
         
         **3. Rigidità Longitudinale (Flex Index)**
         Range misurato: 5N (Soft) - 40N (Stiff).
-        *Fonte:* [cite: The eﬀects of footwear midsole longitudinal bending stiﬀness on runningeconomy and ground contact biomechanics A systematic review and meta-analysis.pdf]
+        *Fonte:*
         """)
 
     with st.expander("📐 Formule Matematiche del Modello AFT"):
@@ -70,51 +70,71 @@ if check_password():
         if sel_passo != "Tutti": df_filt = df_filt[df_filt["passo"] == sel_passo]
 
     # ============================================
-    # 1. WIZARD GUIDATO
+    # 1. WIZARD GUIDATO (NUOVO BLOCCO)
     # ============================================
 
-    st.header("1. Parametrizzazione Performance (MPI)")
+    st.header("1. Il tuo Profilo di Corsa")
     st.info("Definisci i criteri per calcolare l'indice MPI personalizzato in base alle tue esigenze.")
 
     # --- INTERFACCIA UTENTE SEMPLIFICATA ---
     col_obiettivi, col_preferenze = st.columns(2)
 
     with col_obiettivi:
-        st.subheader("🎯 Obiettivo")
+        st.subheader("🎯 Obiettivo e Corsa")
         run_type = st.select_slider(
             "Per cosa userai queste scarpe?",
             options=["Recupero / Easy", "Lungo Lento", "Allenamento Quotidiano", "Tempo / Ripetute", "Gara / PB"],
             value="Allenamento Quotidiano"
         )
         weight_priority = st.slider(
-            "Quanto è importante che la scarpa sia leggera?",
-            min_value=0, max_value=100, value=50, step=10
+            "Importanza della leggerezza:",
+            min_value=0, max_value=100, value=50, step=10,
+            help="0% = Non importante (priorità protezione). 100% = Priorità assoluta (efficienza)."
         )
 
     with col_preferenze:
-        st.subheader("❤️ Sensazioni")
+        st.subheader("❤️ Sensazioni e Stile")
         feel_preference = st.select_slider(
             "Che sensazione cerchi sotto il piede?",
-            options=["Nuvola (Max Morbidezza)", "Bilanciata", "Secca / Reattiva"],
+            options=["Massimo Cuscino (Morbida)", "Cuscino Protettivo", "Bilanciata", "Reattiva / Veloce", "Piatta / Secca (Max Spinta)"],
             value="Bilanciata"
         )
         heel_pct = st.slider(
-            "Come appoggi il piede?",
-            min_value=0, max_value=100, value=40, step=10
+            "Percentuale di appoggio del tallone:",
+            min_value=0, max_value=100, value=40, step=10,
+            help="0% = Avampiede puro. 100% = Tallone puro."
         )
 
     # --- MOTORE DI TRADUZIONE (USER -> TECH) ---
     map_run_type = {"Recupero / Easy": 0, "Lungo Lento": 1, "Allenamento Quotidiano": 2, "Tempo / Ripetute": 3, "Gara / PB": 4}
-    score_goal = map_run_type[run_type]
-    map_feel = {"Nuvola (Max Morbidezza)": 0, "Bilanciata": 1, "Secca / Reattiva": 2}
-    score_feel = map_feel[feel_preference]
+    score_goal = map_run_type[run_type] 
 
-    # Calcolo pesi euristici
+    map_feel = {"Massimo Cuscino (Morbida)": 0, "Cuscino Protettivo": 1, "Bilanciata": 2, "Reattiva / Veloce": 3, "Piatta / Secca (Max Spinta)": 4}
+    score_feel = map_feel[feel_preference] 
+
+    # --- CALCOLO PESI AUTOMATICO ---
+    # Pesi base
     w_shock, w_energy, w_flex, w_weight = 2.0, 2.0, 1.0, 1.0
-    w_shock -= score_goal * 0.3; w_energy += score_goal * 0.8; w_flex += score_goal * 0.6
-    if score_feel == 0: w_shock += 2.0; w_flex -= 0.5
-    elif score_feel == 2: w_shock -= 0.5; w_flex += 1.0; w_energy += 0.5
+
+    # Aggiustamento OBIETTIVO
+    w_shock  -= score_goal * 0.3
+    w_energy += score_goal * 0.8
+    w_flex   += score_goal * 0.6
+
+    # Aggiustamento FEELING (Ora su 5 punti)
+    if score_feel == 0: # Massimo Cuscino
+        w_shock += 2.5; w_flex -= 1.0
+    elif score_feel == 1: # Cuscino Protettivo
+        w_shock += 1.0; w_energy -= 0.5
+    elif score_feel == 3: # Reattiva / Veloce
+        w_energy += 1.5; w_flex += 0.5
+    elif score_feel == 4: # Piatta / Secca
+        w_shock -= 1.5; w_flex += 2.0; w_energy += 1.0
+
+    # Aggiustamento PESO
     w_weight = 0.5 + (weight_priority / 100.0) * 3.5
+
+    # Clamp e Normalizzazione
     w_shock, w_energy, w_flex, w_weight = max(0.1, w_shock), max(0.1, w_energy), max(0.1, w_flex), max(0.1, w_weight)
     total_w = w_shock + w_energy + w_flex + w_weight
     pct_shock, pct_energy, pct_flex, pct_weight = (w_shock / total_w) * 100, (w_energy / total_w) * 100, (w_flex / total_w) * 100, (w_weight / total_w) * 100
@@ -127,12 +147,9 @@ if check_password():
         c4.metric("Leggerezza", f"{pct_weight:.0f}%")
 
     # --- CALCOLO MPI REALE ---
-    w_mid = 1.0 - (heel_pct / 100.0)
-    w_heel_val = heel_pct / 100.0
+    w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
     # Ricalcolo dinamico indici parziali (Shock/Energy)
-    # FIX: safe_norm deve essere chiamata su colonne valide. 
-    # Le variabili w_heel_val e w_mid sono ora definite e utilizzabili.
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
@@ -150,14 +167,22 @@ if check_password():
     else:
         df_filt["ValueIndex"] = 0.0
 
-    # --- BEST PICK ---
+    # --- RESTO DELL'APP ---
+    # ... (Il resto del codice continua) ...
+    
+    # Best Pick
     st.markdown("---")
     st.header("💡 Best Pick")
     if PRICE_COL:
         min_price = df_filt[PRICE_COL].min()
         max_price = df_filt[PRICE_COL].max()
         
-        b_max = st.slider("Budget Max (€)", int(min_price) if not np.isnan(min_price) else 50, int(max_price) if not np.isnan(max_price) else 300, 200, 5)
+        # Gestione NaN per il Budget Slider
+        min_p = int(min_price) if not np.isnan(min_price) else 50
+        max_p = int(max_price) if not np.isnan(max_price) else 300
+        default_p = int(min_p + (max_p - min_p) * 0.75)
+
+        b_max = st.slider("Budget Max (€)", min_p, max_p, default_p, 5)
         
         picks = df_filt[df_filt[PRICE_COL] <= b_max].sort_values("MPI_B", ascending=False)
         if not picks.empty:
@@ -170,7 +195,7 @@ if check_password():
         else:
             st.warning("Nessun risultato nel range di budget.")
     
-    # --- STEP 2: ANALISI MERCATO ---
+    # Analisi Mercato
     st.markdown("---")
     st.header("2. Analisi Mercato")
     
@@ -196,7 +221,7 @@ if check_password():
             st.write("Top Value")
             st.dataframe(df_val_sorted[["label", "MPI_B", "ValueIndex"]].head(10), use_container_width=True, hide_index=True)
 
-        # --- STEP 3: DETTAGLIO ---
+        # Dettaglio
         st.markdown("---")
         st.header("3. Scheda Tecnica")
         row = df_filt[df_filt["label"] == sel_input].iloc[0]
@@ -216,7 +241,7 @@ if check_password():
                 colA.progress(row['FlexIndex'], text=f"Flex: {row['FlexIndex']:.2f}")
                 colB.progress(row['DriveIndex'], text=f"Drive: {row['DriveIndex']:.2f}")
 
-        # --- STEP 4: SIMILITUDINE ---
+        # Simili
         st.markdown("---")
         st.header("4. Similitudine & Radar")
         cols_sim = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
@@ -235,7 +260,7 @@ if check_password():
         else:
             st.warning("Nessun dato con i filtri attuali.")
         
-        # --- TABELLA CONTROLLO ---
+        # Tabella Controllo
         st.markdown("---")
         with st.expander("📊 Tabella di Controllo Completa"):
             cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StackFactor", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
