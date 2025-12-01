@@ -78,68 +78,94 @@ if check_password():
         if sel_brand != "Tutte": df_filt = df_filt[df_filt["marca"] == sel_brand]
         if sel_passo != "Tutti": df_filt = df_filt[df_filt["passo"] == sel_passo]
 
+   # main.py (SOLO MODIFICHE ALLO STEP 1 E AL RICALCOLO)
+
+# ... (Intestazioni, Login, Expander, Caricamento Dati) ...
+
     # ============================================
-    # 1. WIZARD GUIDATO
+    # 1. WIZARD GUIDATO (PESO E PACE)
     # ============================================
 
     st.header("1. Parametrizzazione Performance (MPI)")
-    st.info("Definisci i criteri per calcolare l'indice MPI personalizzato in base alle tue esigenze.")
+    st.info("Utilizza il tuo peso e il passo target per calibrare l'analisi.")
 
-    col_obiettivi, col_preferenze = st.columns(2)
+    col_fisico, col_preferenze = st.columns(2)
 
-    with col_obiettivi:
-        st.subheader("🎯 Obiettivo e Stile")
-        run_type = st.select_slider(
-            "Per cosa userai queste scarpe?",
-            options=["Recupero / Easy", "Lungo Lento", "Allenamento Quotidiano", "Tempo / Ripetute", "Gara / PB"],
-            value="Allenamento Quotidiano"
+    # --- INPUT FISICO (NUOVE VARIABILI) ---
+    with col_fisico:
+        st.subheader("🎯 Fisico e Obiettivo")
+        
+        user_weight_kg = st.slider(
+            "Massa Corporea Attuale (kg):",
+            min_value=50, max_value=120, value=75, step=5,
+            help="Influenza la necessità di Shock Absorption e stabilità."
         )
+        
+        # Pace Target (Range convertito internamente)
+        target_pace_sec_km = st.slider(
+            "Passo Medio Target (secondi/km):",
+            min_value=180, max_value=420, value=300, step=10, # 3:00/km (180s) a 7:00/km (420s)
+            help="3:00/km (Race) -> 420s (Easy/Recovery)"
+        )
+        
         weight_priority = st.slider(
-            "Importanza della leggerezza:",
-            min_value=0, max_value=100, value=50, step=10,
-            help="0% = Priorità protezione. 100% = Priorità efficienza."
+            "Importanza Leggerezza Scarpa:",
+            min_value=0, max_value=100, value=50, step=10
         )
 
     with col_preferenze:
-        st.subheader("❤️ Sensazioni")
+        st.subheader("❤️ Sensazioni Richieste")
         
         shock_preference = st.select_slider(
             "Ammortizzazione e Protezione (Shock):",
             options=["Minima", "Moderata", "Bilanciata", "Elevata", "Massima"],
-            value="Bilanciata",
-            help="Quanto vuoi che la scarpa assorba l'impatto (Dumping)."
+            value="Bilanciata"
         )
         
         drive_preference = st.select_slider(
             "Reattività e Spinta (Drive/Energy):",
             options=["Minima", "Moderata", "Bilanciata", "Elevata", "Massima"],
-            value="Bilanciata",
-            help="Quanto vuoi che la scarpa restituisca energia e spinga in avanti."
+            value="Bilanciata"
         )
         
         heel_pct = st.slider(
             "Percentuale di appoggio del tallone:",
-            min_value=0, max_value=100, value=40, step=10,
-            help="0% = Avampiede puro. 100% = Tallone puro."
+            min_value=0, max_value=100, value=40, step=10
         )
 
-    # --- MOTORE DI TRADUZIONE (USER -> TECH) ---
-    map_goal = {"Recupero / Easy": 0, "Lungo Lento": 1, "Allenamento Quotidiano": 2, "Tempo / Ripetute": 3, "Gara / PB": 4}
-    score_goal = map_goal[run_type] 
+    # --- MOTORE DI TRADUZIONE (PESO/PACE -> TECH) ---
+    
+    # 1. Fattore di Performance (0=Lento a 1=Veloce)
+    P_min_s = 180; P_max_s = 420
+    performance_factor = 1.0 - (target_pace_sec_km - P_min_s) / (P_max_s - P_min_s)
+    performance_factor = np.clip(performance_factor, 0, 1)
 
+    # 2. Sensibilità al Peso Corporeo (Range 60kg -> 100kg)
+    W_min_sens = 60; W_max_sens = 100
+    weight_sensitivity = (user_weight_kg - W_min_sens) / (W_max_sens - W_min_sens)
+    weight_sensitivity = np.clip(weight_sensitivity, 0, 1) 
+
+    # 3. Fattore di Amplificazione Biomeccanica (MAX se Massivo E Veloce)
+    amplification_factor = performance_factor * weight_sensitivity # [0 a 1]
+
+    # Mappatura Selettori (0-4)
     map_pref = {"Minima": 0, "Moderata": 1, "Bilanciata": 2, "Elevata": 3, "Massima": 4}
     score_shock = map_pref[shock_preference]
     score_drive = map_pref[drive_preference]
 
-    # Calcolo pesi euristici
-    w_shock, w_energy, w_flex, w_weight = 1.0, 1.0, 1.0, 1.0
-    w_shock -= score_goal * 0.3; w_energy += score_goal * 0.8; w_flex += score_goal * 0.6
-    if score_shock == 0: w_shock += 0.5; w_energy -= 0.5; w_flex -= 0.5
-    elif score_shock == 4: w_shock += 1.5; w_energy -= 0.5
-    if score_drive == 0: w_energy -= 0.5; w_flex -= 0.5
-    elif score_drive == 4: w_energy += 1.5; w_flex += 1.0
+    # --- CALCOLO PESI MPI FINALI ---
     
+    # 1. Shock: Base + Preferenza + Sensibilità al Peso Corporeo
+    w_shock = (0.5 + score_shock * 1.0) + (1.5 * weight_sensitivity)
+    
+    # 2. Energy/Flex: Base + Preferenza + Pace + Amplificazione Biomeccanica (Effetto Carico Veloce)
+    w_energy = (0.5 + score_drive * 1.0) + (1.5 * performance_factor) + (1.0 * amplification_factor)
+    w_flex = (0.5 + score_drive * 1.0) + (1.0 * performance_factor) + (0.5 * amplification_factor)
+    
+    # 3. Weight: Base + Priorità Utente (Diretta)
     w_weight = 0.5 + (weight_priority / 100.0) * 3.5
+
+    # Clamp e Normalizzazione
     w_shock, w_energy, w_flex, w_weight = max(0.1, w_shock), max(0.1, w_energy), max(0.1, w_flex), max(0.1, w_weight)
     total_w = w_shock + w_energy + w_flex + w_weight
     pct_shock, pct_energy, pct_flex, pct_weight = (w_shock / total_w) * 100, (w_energy / total_w) * 100, (w_flex / total_w) * 100, (w_weight / total_w) * 100
@@ -154,7 +180,6 @@ if check_password():
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
-    # FIX APPLICATO: Sostituito df.filt con df_filt
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
@@ -171,6 +196,8 @@ if check_password():
         df_filt["ValueIndex"] = safe_norm(v_raw).round(2)
     else:
         df_filt["ValueIndex"] = 0.0
+        
+# ... (Il resto dello script Step 1.5, 2, 3, 4 continua) ...
 
     # ============================================
     # 1.5 BEST PICK (LEADER)
@@ -321,3 +348,4 @@ if check_password():
             cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StackFactor", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
             if PRICE_COL: cols_ctrl.append(PRICE_COL)
             st.dataframe(df_filt[[c for c in cols_ctrl if c in df_filt.columns]], use_container_width=True)
+
