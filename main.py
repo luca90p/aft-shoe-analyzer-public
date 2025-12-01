@@ -11,7 +11,7 @@ from aft_utils import check_password, load_and_process, safe_norm
 # =========================
 #   CONFIGURAZIONE E LOGIN
 # =========================
-st.set_page_page_config(page_title="AFT Analyst", layout="wide")
+st.set_page_config(page_title="AFT Analyst", layout="wide")
 
 if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
@@ -295,3 +295,4 @@ if check_password():
             cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StackFactor", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
             if PRICE_COL: cols_ctrl.append(PRICE_COL)
             st.dataframe(df_filt[[c for c in cols_ctrl if c in df_filt.columns]], use_container_width=True)
+
