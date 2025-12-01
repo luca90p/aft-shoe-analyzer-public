@@ -11,37 +11,46 @@ from aft_utils import check_password, load_and_process, safe_norm
 # =========================
 #   CONFIGURAZIONE E LOGIN
 # =========================
-st.set_page_config(page_title="AFT Analyst", layout="wide")
+st.set_page_page_config(page_title="AFT Analyst", layout="wide")
 
 if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
     st.markdown("**Advanced Footwear Technology Analysis Tool**")
 
-    # --- EXPANDERs (Documentazione) ---
+    # --- EXPANDER METODOLOGIA (AGGIORNATO CON CITAZIONI) ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
-        **1. Costo Metabolico del Peso**
-        Ogni 100g extra aumentano il costo energetico dell'1%.
-        *Fonte:* [metabolic cost of running, body weight influence.pdf]
+        L'algoritmo MPI-B integra evidenze scientifiche per valutare l'efficienza della calzatura.
         
-        **2. Indice di Spinta Meccanica (Drive Index)**
-        Sinergia tra Piastra, Rocker e Rigidità.
-        *Fonte:* [Effects of the curved carbon fibre plate and PEBA foam on the energycost of running and muscle activation.pdf]
+        **1. Rigidità Longitudinale (Flex Index)**
+        Il database misura la **Forza (N)** necessaria per flettere la suola di 30°. Il punteggio segue una modellazione non lineare.
+        * **Logica:** Le scarpe da gara premiano la rigidità elevata; quelle da allenamento cercano un valore moderato per comfort.
+        * *Fonte:* **Rodrigo-Carranza et al. (2022).** *The effects of footwear midsole longitudinal bending stiffness on running economy...*
         
-        **3. Rigidità Longitudinale (Flex Index)**
-        Range misurato: 5N (Soft) - 40N (Stiff).
-        *Fonte:* [The eﬀects of footwear midsole longitudinal bending stiﬀness on runningeconomy and ground contact biomechanics A systematic review and meta-analysis.pdf]
+        **2. Costo Metabolico del Peso (Weight Efficiency)**
+        La funzione di penalità del peso si basa sull'osservazione che **ogni 100g di massa aggiuntiva aumentano il costo energetico dell'1%** (Decadimento esponenziale).
+        * *Fonte:* **Teunissen, Grabowski & Kram (2007).** *Effects of independently altering body weight and body mass on the metabolic cost of running.*
+        
+        **3. Indice di Spinta Meccanica (Drive Index)**
+        La performance deriva dall'interazione ("Teeter-Totter effect") tra la piastra, la geometria Rocker e la rigidità longitudinale. La schiuma fornisce il contributo metabolico primario.
+        * *Fonte:* **Ghanbari et al. (2025).** *Effects of the curved carbon fibre plate and PEBA foam on the energy cost of running...*
+        
+        **4. Stack Height e Stabilità**
+        Lo stack alto (>40mm) può compromettere la stabilità biomeccanica se non adeguatamente compensato.
+        * *Fonte:* **Kettner et al. (2025).** *The effects of running shoe stack height on running style and stability...*
         """)
 
+    # --- EXPANDER FORMULE MATEMATICHE ---
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
         Il calcolo del punteggio totale MPI-B si basa su una somma pesata di 5 indici normalizzati $[0, 1]$.
-        
+
         ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
         * **Race:** Sigmoide centrata su 18N.
         * **Daily:** Gaussiana centrata su 12N.
 
         ### 2. Drive Index ($I_{Drive}$)
+        Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
         $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiffness}) + 0.4 \cdot S_{Foam} $$
         """)
 
@@ -167,9 +176,6 @@ if check_password():
     # --- BEST PICK ---
     st.markdown("---")
     st.header("💡 Best Pick")
-    
-    best_pick_label = None # Inizializzazione
-    
     if PRICE_COL:
         min_price = df_filt[PRICE_COL].min()
         max_price = df_filt[PRICE_COL].max()
@@ -181,14 +187,14 @@ if check_password():
         col_budget, col_best = st.columns([1, 2])
 
         with col_budget:
-            budget_max = st.slider("Budget Max (€):", min_p, max_p, default_p, 5)
+            budget_max = st.slider("Budget Max (€)", min_p, max_p, default_p, 5)
         
         df_budget = df_filt[df_filt[PRICE_COL] <= budget_max].copy()
         
         with col_best:
             if not df_budget.empty:
                 bp = df_budget.sort_values(by="MPI_B", ascending=False).iloc[0]
-                best_pick_label = bp['label'] # <--- MEMORIZZA IL BEST PICK
+                best_pick_label = bp['label']
                 
                 with st.container(border=True):
                     k1, k2 = st.columns([3, 1])
@@ -205,7 +211,7 @@ if check_password():
                 st.warning("Nessun risultato nel range di budget.")
 
     # ============================================
-    # 2. ANALISI MERCATO (UTILIZZA BEST PICK COME DEFAULT)
+    # 2. ANALISI MERCATO
     # ============================================
 
     st.markdown("---")
@@ -215,27 +221,24 @@ if check_password():
         df_val_sorted = df_filt.sort_values("ValueIndex", ascending=False)
         models = df_val_sorted['label'].tolist()
         
-        # 1. Trova l'etichetta da usare come default
+        # Gestione Stato Selezione
+        best_pick_label = best_pick_label if 'best_pick_label' in locals() else models[0]
+
         if 'selected_point_key' not in st.session_state:
-            # Inizializzazione al primo modello del database
-            st.session_state['selected_point_key'] = models[0]
-        
-        # 2. Aggiorna lo stato: Se BEST_PICK è disponibile e valido, usalo.
-        if best_pick_label and best_pick_label in models:
             st.session_state['selected_point_key'] = best_pick_label
         
-        # 3. Controllo consistenza (fallback)
+        # Aggiorna lo stato se il best pick cambia
+        if best_pick_label != st.session_state['selected_point_key'] and best_pick_label in models:
+             st.session_state['selected_point_key'] = best_pick_label
+
         curr_sel = st.session_state['selected_point_key']
         if curr_sel not in models:
             curr_sel = models[0]
             st.session_state['selected_point_key'] = curr_sel
-
+            
         idx_sel = models.index(curr_sel)
         
-        # Selectbox (Il widget che controlla la selezione finale)
         sel_input = st.selectbox("Selezione Modello Target:", models, index=idx_sel, key='main_sb')
-        
-        # Se l'utente cambia la selectbox, aggiorna lo stato
         if sel_input != curr_sel:
             st.session_state['selected_point_key'] = sel_input
             st.rerun()
