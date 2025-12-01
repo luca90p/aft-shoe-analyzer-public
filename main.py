@@ -5,10 +5,10 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Importa le funzioni dai moduli personalizzati (CORREZIONE APPLICATA QUI)
+# Import dai moduli personalizzati
 from aft_core import trova_scarpe_simili
-from aft_plots import plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled, render_stars # <-- plot_mpi_vs_price_plotly AGGIUNTO
-from aft_utils import check_password, load_and_process, safe_norm 
+from aft_plots import plot_radar_comparison_plotly_styled, render_stars
+from aft_utils import check_password, load_and_process, safe_norm
 
 # =========================
 #   CONFIGURAZIONE E LOGIN
@@ -154,6 +154,10 @@ if check_password():
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
+    def safe_norm(s): 
+        s = pd.to_numeric(s, errors='coerce').fillna(s.mean())
+        return (s - s.min()) / max(s.max() - s.min(), 1e-9)
+
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
@@ -162,17 +166,17 @@ if check_password():
          w_energy * df_filt["EnergyIndex_calc"] + 
          w_flex * df_filt["FlexIndex"] + 
          w_weight * df_filt["WeightIndex"]) / total_w
-    ).round(3)
+    ).round(2) # Arrotondato a 2 decimali
 
     if PRICE_COL:
         df_filt = df_filt[df_filt[PRICE_COL] > 0].copy()
         v_raw = df_filt["MPI_B"] / df_filt[PRICE_COL]
-        df_filt["ValueIndex"] = safe_norm(v_raw)
+        df_filt["ValueIndex"] = safe_norm(v_raw).round(2) # Arrotondato a 2 decimali
     else:
         df_filt["ValueIndex"] = 0.0
 
     # ============================================
-    # 1.5 BEST PICK (LEADER)
+    # 1.5 BEST PICK (Podio)
     # ============================================
 
     st.markdown("---")
@@ -198,19 +202,17 @@ if check_password():
         with col_best:
             if not df_budget.empty:
                 
-                # Trova il Best Pick (Leader)
                 top_picks_all = df_budget.sort_values(by="MPI_B", ascending=False)
                 top_pick_label = top_picks_all.iloc[0]['label']
                 
-                # Calcola i vicini biomeccanici del Leader per le posizioni 2 e 3
                 cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
                 simili_raw = trova_scarpe_simili(df_budget, top_pick_label, cols_simil, n_simili=3)
                 
-                # Costruisci il Podio: Leader (Max MPI) + 2 Più Simili al Leader
+                # Unifica il Best Pick (Modello #1) e i 2 modelli più simili
                 top_picks = pd.concat([top_picks_all[top_picks_all['label'] == top_pick_label].head(1), simili_raw.head(2)], ignore_index=True)
                 
                 best_pick_label = top_picks.iloc[0]['label']
-                rank_labels = ["🥇 Leader", "🥈 Alternativa 1", "🥉 Alternativa 2"]
+                rank_labels = ["🥇 1° Posto", "🥈 2° Posto", "🥉 3° Posto"]
                 
                 cols_podium = st.columns(3)
                 
@@ -225,7 +227,7 @@ if check_password():
                             if pd.notna(bp.get('versione')):
                                 st.caption(f"Versione: {int(bp['versione'])}")
                             
-                            st.write(f"MPI Score: **{bp['MPI_B']:.3f}**")
+                            st.write(f"MPI Score: **{bp['MPI_B']:.2f}**")
                             st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
                             
                             if pd.notna(bp.get('ValueIndex')):
@@ -284,10 +286,10 @@ if check_password():
         with st.container(border=True):
             c1, c2 = st.columns([1, 2])
             with c1:
-                st.subheader(row['marca'])
+                st.subheader(f"{row['marca']}")
                 st.markdown(f"**{row['modello']}**")
-                st.metric("MPI", row['MPI_B'])
-                st.write(f"**Value:** {row['ValueIndex']} {render_stars(row['ValueIndex'])}")
+                st.metric("MPI", f"{row['MPI_B']:.2f}")
+                st.write(f"**Value:** {row['ValueIndex']:.2f} {render_stars(row['ValueIndex'])}")
             with c2:
                 st.write(f"Peso: {row['peso']}g | Cluster: {row['ClusterDescrizione']}")
                 colA, colB = st.columns(2)
@@ -308,7 +310,7 @@ if check_password():
                 with cc[i]:
                     with st.container(border=True):
                         st.markdown(f"**{s_row['label']}**")
-                        st.caption(f"Dist: {s_row['distanza_similitudine']:.3f}")
+                        st.caption(f"Dist: {s_row['distanza_similitudine']:.2f}")
             
             df_rad = pd.concat([df_filt[df_filt['label']==sel_input], simili], ignore_index=True)
             st.plotly_chart(plot_radar_comparison_plotly_styled(df_rad, cols_sim), use_container_width=True)
