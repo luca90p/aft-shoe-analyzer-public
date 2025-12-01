@@ -1,17 +1,94 @@
 # main.py
-import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
+import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Import dai moduli personalizzati
 from aft_core import trova_scarpe_simili
-from aft_plots import plot_mpi_vs_price_plotly, plot_radar_comparison_plotly_styled, render_stars
+from aft_plots import plot_radar_comparison_plotly_styled, render_stars
 from aft_utils import check_password, load_and_process, safe_norm
 
 # =========================
-#   CONFIGURAZIONE E LOGIN
+#   CONFIGURAZIONE PAGINA
 # =========================
 st.set_page_config(page_title="AFT Analyst", layout="wide")
+
+# =========================
+#   FUNZIONE PLOT AGGIORNATA
+# =========================
+
+def plot_mpi_vs_price_plotly(df_val, price_col, podium_labels):
+    """ Scatter plot MPI-B vs Prezzo con ranking del podio. """
+    
+    # 1. Mappa le etichette ai ranghi del podio (1, 2, 3) o 0 (altri)
+    def map_rank(label):
+        if len(podium_labels) > 0 and label == podium_labels[0]: return '1 - Oro (Target)'
+        if len(podium_labels) > 1 and label == podium_labels[1]: return '2 - Argento'
+        if len(podium_labels) > 2 and label == podium_labels[2]: return '3 - Bronzo'
+        return '4 - Database'
+    
+    df_val['Podium_Rank'] = df_val['label'].apply(map_rank)
+    
+    # 2. Ordinamento Z-Order: Disegna prima il Database, poi i ranghi (dal Bronzo all'Oro)
+    # L'ordinamento crescente di 'Podium_Rank' (che inizia con 1, 2, 3, 4) garantisce che il Database vada per primo.
+    df_val = df_val.sort_values(by='Podium_Rank', ascending=True).reset_index(drop=True)
+    
+    # 3. Testo Hover
+    df_val['hover_text'] = df_val.apply(
+        lambda row: f"<b>{row['label']}</b> ({row['Podium_Rank'].split()[0]})<br>"
+                    f"MPI-B: {row['MPI_B']:.3f}<br>"
+                    f"Costo: {row[price_col]:.0f}€<br>"
+                    f"Value Index: {row['ValueIndex']:.3f}", axis=1
+    )
+    
+    # DEFINIZIONE COLORI DISCRETI
+    color_map = {
+        '1 - Oro (Target)': '#FFD700',   # Gold
+        '2 - Argento': '#C0C0C0',       # Silver
+        '3 - Bronzo': '#CD7F32',        # Bronze
+        '4 - Database': '#A9A9A9'       # Gray
+    }
+
+    fig = px.scatter(
+        df_val,
+        x=price_col,
+        y="MPI_B",
+        color='Podium_Rank', # Colore in base al Rank
+        size='ValueIndex',
+        size_max=25, 
+        hover_name='hover_text',
+        color_discrete_map=color_map,
+        labels={price_col: f'{price_col} [€]', "MPI_B": "Indice MPI-B"},
+        title="Analisi Costo-Efficienza (Podio Evidenziato)"
+    )
+
+    # 4. Styling per visibilità (Solo il pallino d'Oro ha un bordo più spesso)
+    fig.update_traces(
+        marker=dict(
+            opacity=0.8,
+            # Bordo spesso per i primi tre posti, sottile per gli altri
+            line=dict(width=df_val['Podium_Rank'].apply(lambda x: 2 if x != '4 - Database' else 0.5), 
+                      color=df_val['Podium_Rank'].apply(lambda x: 'black' if x != '4 - Database' else '#A9A9A9')),
+        ),
+        selector=dict(mode='markers')
+    )
+    
+    fig.update_layout(
+        hovermode="closest",
+        yaxis=dict(title="Performance Index (MPI)", range=[0, 1.05]),
+        xaxis=dict(title="Prezzo di Listino (€)"),
+        legend_title_text='Legenda',
+        margin=dict(l=20, r=20, t=40, b=20)
+    )
+    
+    return fig
+
+
+# =========================
+#   MAIN APP LOGIC
+# =========================
 
 if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
@@ -78,7 +155,6 @@ if check_password():
     st.header("1. Parametrizzazione Performance (MPI)")
     st.info("Definisci i criteri per calcolare l'indice MPI personalizzato in base alle tue esigenze.")
 
-    # --- INTERFACCIA UTENTE SEMPLIFICATA ---
     col_obiettivi, col_preferenze = st.columns(2)
 
     with col_obiettivi:
@@ -153,7 +229,7 @@ if check_password():
         return (s - s.min()) / max(s.max() - s.min(), 1e-9)
 
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
-    df_filt["EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
+    df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
     df_filt.loc[:, "MPI_B"] = (
         (w_shock * df_filt["ShockIndex_calc"] + 
@@ -173,6 +249,8 @@ if check_password():
     st.markdown("---")
     st.header("💡 Best Pick: Il Podio per il tuo Budget")
     
+    best_pick_label = None
+
     if PRICE_COL:
         min_price = df_filt[PRICE_COL].min()
         max_price = df_filt[PRICE_COL].max()
@@ -191,6 +269,7 @@ if check_password():
         with col_best:
             if not df_budget.empty:
                 top_picks = df_budget.sort_values(by="MPI_B", ascending=False).head(3)
+                best_pick_label = top_picks.iloc[0]['label']
                 rank_labels = ["🥇 1° Posto", "🥈 2° Posto", "🥉 3° Posto"]
                 
                 cols_podium = st.columns(3)
@@ -212,8 +291,11 @@ if check_password():
                                 st.caption(f"Value: {stars}")
             else:
                 st.warning("Nessun risultato nel range di budget.")
-    
-    # --- STEP 2: ANALISI MERCATO ---
+
+    # ============================================
+    # 2. ANALISI MERCATO (UTILIZZA BEST PICK COME DEFAULT)
+    # ============================================
+
     st.markdown("---")
     st.header("2. Analisi Comparativa di Mercato")
     
@@ -222,15 +304,16 @@ if check_password():
         models = df_val_sorted['label'].tolist()
         
         # 1. Trova l'etichetta da usare come default
-        best_pick_label = top_picks.iloc[0]['label'] if 'top_picks' in locals() and not top_picks.empty else models[0]
+        best_pick_label_check = best_pick_label if 'best_pick_label' in locals() and best_pick_label in models else models[0]
 
         if 'selected_point_key' not in st.session_state:
-            st.session_state['selected_point_key'] = best_pick_label
+            st.session_state['selected_point_key'] = best_pick_label_check
         
-        # 2. Aggiorna lo stato se il best pick cambia
-        if best_pick_label != st.session_state['selected_point_key'] and best_pick_label in models:
-             st.session_state['selected_point_key'] = best_pick_label
-        
+        # 2. Aggiorna lo stato se il best pick è diverso dal target attuale
+        if best_pick_label_check != st.session_state['selected_point_key']:
+             st.session_state['selected_point_key'] = best_pick_label_check
+             st.rerun() 
+
         # 3. Controllo consistenza (fallback)
         curr_sel = st.session_state['selected_point_key']
         if curr_sel not in models:
