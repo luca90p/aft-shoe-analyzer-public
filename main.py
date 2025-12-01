@@ -22,17 +22,22 @@ if check_password():
     # --- EXPANDERs (Documentazione) ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
-        **1. Costo Metabolico del Peso**
-        Ogni 100g extra aumentano il costo energetico dell'1%.
-        *Fonte:*
+        **1. Rigidità Longitudinale (Flex Index)**
+        Il database misura la **Forza (N)** necessaria per flettere la suola di 30°. Il punteggio segue una modellazione non lineare.
+        * **Logica:** Le scarpe da gara premiano la rigidità elevata; quelle da allenamento cercano un valore moderato per comfort.
+        * *Fonte:* **Rodrigo-Carranza et al. (2022).** *The effects of footwear midsole longitudinal bending stiffness on running economy...*
         
-        **2. Indice di Spinta Meccanica (Drive Index)**
-        Sinergia tra Piastra, Rocker e Rigidità.
-        *Fonte:*
+        **2. Costo Metabolico del Peso (Weight Efficiency)**
+        *Ogni 100g di massa aggiuntiva aumentano il costo energetico dell'1%.* La funzione di penalità del peso segue un decadimento esponenziale.
+        * *Fonte:* **Teunissen, Grabowski & Kram (2007).** *Effects of independently altering body weight and body mass on the metabolic cost of running.*
         
-        **3. Rigidità Longitudinale (Flex Index)**
-        Range misurato: 5N (Soft) - 40N (Stiff).
-        *Fonte:*
+        **3. Indice di Spinta Meccanica (Drive Index)**
+        La performance deriva dall'interazione ("Teeter-Totter effect") tra la piastra, la geometria Rocker e la rigidità.
+        * *Fonte:* **Ghanbari et al. (2025).** *Effects of the curved carbon fibre plate and PEBA foam on the energy cost of running...*
+        
+        **4. Stack Height e Stabilità**
+        Lo stack alto (>40mm) può compromettere la stabilità biomeccanica se non adeguatamente compensato.
+        * *Fonte:* **Kettner et al. (2025).** *The effects of running shoe stack height on running style and stability...*
         """)
 
     with st.expander("📐 Formule Matematiche del Modello AFT"):
@@ -149,6 +154,10 @@ if check_password():
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
+    def safe_norm(s): 
+        s = pd.to_numeric(s, errors='coerce').fillna(s.mean())
+        return (s - s.min()) / max(s.max() - s.min(), 1e-9)
+
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
@@ -167,11 +176,11 @@ if check_password():
         df_filt["ValueIndex"] = 0.0
 
     # ============================================
-    # 1.5 BEST PICK (UNIFIED LOGIC)
+    # 1.5 BEST PICK (LEADER)
     # ============================================
 
     st.markdown("---")
-    st.header("💡 Best Pick: Il Podio per il tuo Budget")
+    st.header("💡 Best Pick: Il Leader per il tuo Budget")
     
     best_pick_label = None
 
@@ -193,39 +202,25 @@ if check_password():
         with col_best:
             if not df_budget.empty:
                 
-                # 1. Trova il BEST PICK (Modello #1)
-                top_picks_all = df_budget.sort_values(by="MPI_B", ascending=False)
-                top_pick_label = top_picks_all.iloc[0]['label']
+                # Trova il Best Pick (Leader)
+                bp = df_budget.sort_values(by="MPI_B", ascending=False).iloc[0]
+                best_pick_label = bp['label']
                 
-                # 2. Trova i vicini biomeccanici del Best Pick (#2 e #3)
-                cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
-                simili_raw = trova_scarpe_simili(df_budget, top_pick_label, cols_simil, n_simili=3)
-                
-                # Unifica il Best Pick (Modello #1) e i 2 modelli più simili
-                top_picks = pd.concat([top_picks_all[top_picks_all['label'] == top_pick_label].head(1), simili_raw.head(2)], ignore_index=True)
-                
-                best_pick_label = top_picks.iloc[0]['label']
-                rank_labels = ["🥇 1° Posto", "🥈 2° Posto", "🥉 3° Posto"]
-                
-                cols_podium = st.columns(3)
-                
-                for i, (idx, bp) in enumerate(top_picks.iterrows()):
-                    if i >= 3: break
-                    
-                    with cols_podium[i]:
-                        with st.container(border=True):
-                            st.markdown(f"#### {rank_labels[i]}")
-                            st.subheader(f"{bp['marca']} {bp['modello']}")
-                            
-                            if pd.notna(bp.get('versione')):
-                                st.caption(f"Versione: {int(bp['versione'])}")
-                            
-                            st.write(f"MPI Score: **{bp['MPI_B']:.3f}**")
-                            st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
-                            
-                            if pd.notna(bp.get('ValueIndex')):
-                                stars = render_stars(bp['ValueIndex'])
-                                st.caption(f"Value: {stars}")
+                with st.container(border=True):
+                    k1, k2 = st.columns([3, 1])
+                    with k1:
+                        st.subheader(f"🏆 {bp['marca']} {bp['modello']}")
+                        st.write(f"Best in Class (< {budget_max}€)")
+                        if pd.notna(bp.get('versione')):
+                            st.caption(f"Versione: {int(bp['versione'])}")
+
+                    with k2:
+                        st.metric("MPI Score", f"{bp['MPI_B']:.3f}")
+                        st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
+                        
+                        if pd.notna(bp.get('ValueIndex')):
+                            stars = render_stars(bp['ValueIndex'])
+                            st.caption(f"Value: {stars}")
             else:
                 st.warning("Nessun risultato nel range di budget.")
 
@@ -294,9 +289,12 @@ if check_password():
         # --- STEP 4: SIMILITUDINE ---
         st.markdown("---")
         st.header("4. Similitudine & Radar")
-        cols_sim = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
-        simili = trova_scarpe_simili(df_filt, sel_input, cols_sim)
         
+        # 1. Usa la selezione corrente come target per la similarità
+        target_label = sel_input
+        cols_sim = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
+        simili = trova_scarpe_simili(df_filt, target_label, cols_sim) # trova i 3 più vicini al target
+
         if not simili.empty:
             cc = st.columns(3)
             for i, (_, s_row) in enumerate(simili.iterrows()):
@@ -305,7 +303,7 @@ if check_password():
                         st.markdown(f"**{s_row['label']}**")
                         st.caption(f"Dist: {s_row['distanza_similitudine']:.3f}")
             
-            df_rad = pd.concat([df_filt[df_filt['label']==sel_input], simili], ignore_index=True)
+            df_rad = pd.concat([df_filt[df_filt['label']==target_label], simili], ignore_index=True)
             st.plotly_chart(plot_radar_comparison_plotly_styled(df_rad, cols_sim), use_container_width=True)
         else:
             st.warning("Nessun dato con i filtri attuali.")
