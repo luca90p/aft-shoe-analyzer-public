@@ -1,17 +1,11 @@
+# aft_core.py
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
 
-# =========================
-#   LOGICA DI CALCOLO (CORE)
-# =========================
-
 def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calcola il 'Drive Index' (0-1). Scala rigidità corretta 5N-35N.
-    """
-    # 1. Score Piastra
+    """ Calcola il 'Drive Index' (0-1). """
     def score_plate(val):
         val = str(val).lower()
         if 'carbon' in val or 'carbitex' in val: return 1.0
@@ -21,7 +15,6 @@ def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
 
     S_Plate = df['piastra'].apply(score_plate)
 
-    # 2. Score Rocker
     def score_rocker(val):
         if pd.isna(val) or str(val) in ['nan', '#N/D']: return 0.0
         try:
@@ -35,16 +28,12 @@ def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
             return 0.0
             
     S_Rocker = df['rocker'].apply(score_rocker)
-
-    # 3. Score Schiuma
     S_Foam = df['EnergyIndex'] 
-
-    # 4. Score Rigidità (Range 5-35N)
+    
     flex_val = pd.to_numeric(df['rigidezza_flex'], errors='coerce').fillna(15)
     S_Stiffness = (flex_val - 5) / 30.0 
     S_Stiffness = S_Stiffness.clip(0, 1)
 
-    # Formula Teeter-Totter
     Mechanical_Drive = S_Plate * S_Rocker * S_Stiffness
     df['DriveIndex'] = (0.6 * Mechanical_Drive) + (0.4 * S_Foam)
     
@@ -70,7 +59,7 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df["ShockIndex"]  = (w_heel * S_heel + w_mid * S_mid) / (w_heel + w_mid)
     df["EnergyIndex"] = (w_heel * ER_h   + w_mid * ER_m)  / (w_heel + w_mid)
 
-    # 2. Flex Index (Range 5-40N)
+    # 2. Flex Index
     Flex = pd.to_numeric(df["rigidezza_flex"], errors='coerce').fillna(15)
     FlexIndex = np.zeros(len(df))
     passi = df["passo"].astype(str).str.lower().to_list()
@@ -173,13 +162,30 @@ def esegui_clustering(df: pd.DataFrame):
 
     return df, cluster_summary
 
-def trova_scarpe_simili(df, target_label, metrics_cols, n_simili=3):
+# --- FIX: Funzione aggiornata per accettare 'weights' ---
+def trova_scarpe_simili(df, target_label, metrics_cols, weights=None, n_simili=3):
+    """
+    Trova le n scarpe più simili. Se weights è fornito, calcola la Distanza Euclidea Pesata.
+    """
     try:
         target_vector = df.loc[df['label'] == target_label, metrics_cols].astype(float).values[0]
         df_calc = df.copy()
+        
         vectors = df_calc[metrics_cols].astype(float).values
-        distances = np.linalg.norm(vectors - target_vector, axis=1)
+        
+        if weights is not None:
+            # Distanza Euclidea Pesata
+            w = np.array(weights)
+            # Assicuriamoci che w sia normalizzato per non falsare la scala
+            w = w / w.sum()
+            diff_sq = (vectors - target_vector) ** 2
+            distances = np.sqrt((diff_sq * w).sum(axis=1))
+        else:
+            # Distanza Standard
+            distances = np.linalg.norm(vectors - target_vector, axis=1)
+            
         df_calc['distanza_similitudine'] = distances
+        
         simili = df_calc[df_calc['label'] != target_label].sort_values('distanza_similitudine').head(n_simili)
         return simili
     except Exception:
