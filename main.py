@@ -284,44 +284,61 @@ if check_password():
             st.write("Top Value")
             st.dataframe(df_val_sorted[["label", "MPI_B", "ValueIndex"]].head(10), use_container_width=True, hide_index=True)
 
-        # --- STEP 3: DETTAGLIO (CON DURABILITA' E FIT) ---
-        st.markdown("---")
-        st.header("3. Scheda Tecnica")
+        # ============================================
+    # 3. SCHEDA DETTAGLIO
+    # ============================================
+
+    st.markdown("---")
+    st.header("3. Scheda Tecnica")
+    
+    # Recupera la riga selezionata in modo sicuro
+    try:
         row = df_filt[df_filt["label"] == sel_input].iloc[0]
+    except IndexError:
+        st.warning("Errore nel recupero del modello selezionato.")
+        st.stop()
+    
+    with st.container(border=True):
+        c1, c2 = st.columns([1, 2])
         
-        with st.container(border=True):
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                st.subheader(f"{row['marca']}")
-                st.markdown(f"**{row['modello']}**")
-                st.metric("MPI", f"{row['MPI_B']:.2f}")
-                st.write(f"**Value:** {row['ValueIndex']:.2f} {render_stars(row['ValueIndex'])}")
-                
-                # SEZIONE EXTRA INFO (Durability & Fit)
-                st.markdown("---")
-                st.markdown("#### ℹ️ Info Extra")
-                
-                # Fit Class
-                if 'FitClass' in row:
-                    st.info(f"👟 **Calzata:** {row['FitClass']}")
-                
-                # Durabilità
-                if 'DurabilityIndex' in row:
-                    dur_val = float(row['DurabilityIndex'])
-                    dur_desc = "Eccellente 💎" if dur_val > 0.8 else "Buona 👍" if dur_val > 0.65 else "Media ⚙️" if dur_val > 0.4 else "Bassa ⚠️"
-                    st.write(f"🛡️ **Durabilità Stimata:** {dur_desc} ({dur_val:.2f})")
-                    st.progress(dur_val)
+        # Colonna Sinistra: Info Generali e Valore
+        with c1:
+            st.subheader(f"{row['marca']}")
+            st.markdown(f"**{row['modello']}**")
+            if pd.notna(row.get('versione')):
+                st.caption(f"Versione: {int(row['versione'])}")
+            
+            st.metric("MPI Score", f"{row['MPI_B']:.2f}")
+            st.write(f"Prezzo: **{row[PRICE_COL]:.0f} €**")
+            
+            if pd.notna(row.get('ValueIndex')):
+                val_idx = float(row['ValueIndex'])
+                stars = render_stars(val_idx)
+                st.write(f"**Value:** {val_idx:.2f} {stars}")
 
-            with c2:
-                st.write(f"Peso: {row['peso']}g | Cluster: {row['ClusterDescrizione']}")
-                
-                # Indici di performance parziali
-                colA, colB = st.columns(2)
-                colA.progress(row['ShockIndex_calc'], text=f"Shock: {row['ShockIndex_calc']:.2f}")
-                colB.progress(row['EnergyIndex_calc'], text=f"Energy: {row['EnergyIndex_calc']:.2f}")
-                colA.progress(row['FlexIndex'], text=f"Flex: {row['FlexIndex']:.2f}")
-                colB.progress(row['DriveIndex'], text=f"Drive: {row['DriveIndex']:.2f}")
+            # --- NUOVO: Visualizzazione Fit ---
+            if 'FitClass' in row:
+                st.info(f"👟 **Calzata:** {row['FitClass']}")
 
+        # Colonna Destra: Dettagli Tecnici
+        with c2:
+            st.write(f"**Peso:** {row['peso']}g | **Cluster:** {row['ClusterDescrizione']}")
+            
+            colA, colB = st.columns(2)
+            
+            # Indici Performance (MPI)
+            colA.progress(row['ShockIndex_calc'], text=f"Shock: {row['ShockIndex_calc']:.2f}")
+            colB.progress(row['EnergyIndex_calc'], text=f"Energy: {row['EnergyIndex_calc']:.2f}")
+            colA.progress(row['FlexIndex'], text=f"Flex: {row['FlexIndex']:.2f}")
+            colB.progress(row['DriveIndex'], text=f"Drive: {row['DriveIndex']:.2f}")
+            
+            # --- NUOVO: Visualizzazione Durabilità ---
+            st.markdown("---")
+            if 'DurabilityIndex' in row:
+                dur = float(row['DurabilityIndex'])
+                dur_label = "Alta" if dur > 0.7 else "Media" if dur > 0.4 else "Bassa"
+                st.write(f"🛡️ **Durabilità Stimata:** {dur_label} ({dur:.2f})")
+                st.progress(dur)
         # --- STEP 4: SIMILITUDINE (MOSTRA ANCHE EXTRA) ---
         st.markdown("---")
         st.header("4. Similitudine & Radar")
@@ -355,3 +372,4 @@ if check_password():
             cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StackFactor", "DurabilityIndex", "FitClass"]
             if PRICE_COL: cols_ctrl.append(PRICE_COL)
             st.dataframe(df_filt[[c for c in cols_ctrl if c in df_filt.columns]], use_container_width=True)
+
