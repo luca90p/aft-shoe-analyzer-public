@@ -40,17 +40,29 @@ if check_password():
         * *Fonte:* **Kettner et al. (2025).** *The effects of running shoe stack height on running style and stability...*
         """)
 
+    # --- EXPANDER FORMULE (AGGIORNATO) ---
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
-        Il calcolo del punteggio totale MPI-B si basa su una somma pesata di 5 indici normalizzati $[0, 1]$.
+        Il calcolo del punteggio totale **MPI-B** è una somma pesata di 5 indici normalizzati $[0, 1]$.
+        
+        ### 1. Flex Index ($I_{Flex}$)
+        Basato sulla **Forza di Flessione ($F_N$)** in Newton (Range 5N - 40N).
+        * **Race (Modello Sigmoide):** Premia la rigidità alta (> 18N).
+          $$ I_{Flex} = \frac{1}{1 + e^{-(F_N - 18)/2.5}} $$
+        * **Daily (Modello Gaussiano):** Premia il comfort (~12N).
+          $$ I_{Flex} = e^{-\frac{(F_N - 12)^2}{2 \cdot 5^2}} $$
 
-        ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
-        * **Race:** Sigmoide centrata su 18N.
-        * **Daily:** Gaussiana centrata su 12N.
+        ### 2. Drive Index ($I_{Drive}$) - "Teeter-Totter Effect"
+        Modella la spinta come **interazione moltiplicativa** (effetto leva) tra i componenti meccanici, sommata al contributo del materiale.
+        $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiff}) + 0.4 \cdot I_{Energy} $$
+        * $S_{Plate}$: 1.0 (Carbonio), 0.7 (Vetro), 0.5 (Plastica).
+        * $S_{Rocker}$: Altezza punta normalizzata su 10mm.
+        * $S_{Stiff}$: Rigidità normalizzata su 35N ($F_N / 35$).
 
-        ### 2. Drive Index ($I_{Drive}$)
-        Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
-        $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiffness}) + 0.4 \cdot S_{Foam} $$
+        ### 3. Weight Efficiency ($I_{Weight}$)
+        Decadimento esponenziale basato sul costo metabolico (+1% per +100g).
+        $$ I_{Weight} = e^{-0.005 \cdot (Peso_{g} - 180)} $$
+        *(Penalizza progressivamente i pesi superiori a 180g)*.
         """)
 
     # --- CARICAMENTO DATI ---
@@ -329,3 +341,4 @@ if check_password():
             cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StackFactor", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
             if PRICE_COL: cols_ctrl.append(PRICE_COL)
             st.dataframe(df_filt[[c for c in cols_ctrl if c in df_filt.columns]], use_container_width=True)
+
