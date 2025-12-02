@@ -78,38 +78,32 @@ if check_password():
         if sel_brand != "Tutte": df_filt = df_filt[df_filt["marca"] == sel_brand]
         if sel_passo != "Tutti": df_filt = df_filt[df_filt["passo"] == sel_passo]
 
-   # main.py (SOLO MODIFICHE ALLO STEP 1 E AL RICALCOLO)
-
-# ... (Intestazioni, Login, Expander, Caricamento Dati) ...
-
     # ============================================
-    # 1. WIZARD GUIDATO (PESO E PACE)
+    # 1. WIZARD GUIDATO
     # ============================================
 
     st.header("1. Parametrizzazione Performance (MPI)")
-    st.info("Utilizza il tuo peso e il passo target per calibrare l'analisi.")
+    st.info("Definisci i criteri per calcolare l'indice MPI personalizzato in base alle tue esigenze.")
 
-    col_fisico, col_preferenze = st.columns(2)
+    col_obiettivi, col_preferenze = st.columns(2)
 
-    # --- INPUT FISICO (NUOVE VARIABILI) ---
-    with col_fisico:
+    with col_obiettivi:
         st.subheader("🎯 Fisico e Obiettivo")
         
+        # INPUT 1: Peso Corporeo
         user_weight_kg = st.slider(
             "Massa Corporea Attuale (kg):",
-            min_value=50, max_value=120, value=75, step=5,
-            help="Influenza la necessità di Shock Absorption e stabilità."
+            min_value=50, max_value=120, value=75, step=5
         )
         
-        # Pace Target (Range convertito internamente)
+        # INPUT 2: Pace Target
         target_pace_sec_km = st.slider(
             "Passo Medio Target (secondi/km):",
-            min_value=180, max_value=420, value=300, step=10, # 3:00/km (180s) a 7:00/km (420s)
-            help="3:00/km (Race) -> 420s (Easy/Recovery)"
+            min_value=180, max_value=420, value=300, step=10
         )
         
         weight_priority = st.slider(
-            "Importanza Leggerezza Scarpa:",
+            "Importanza della leggerezza:",
             min_value=0, max_value=100, value=50, step=10
         )
 
@@ -146,23 +140,20 @@ if check_password():
     weight_sensitivity = np.clip(weight_sensitivity, 0, 1) 
 
     # 3. Fattore di Amplificazione Biomeccanica (MAX se Massivo E Veloce)
-    amplification_factor = performance_factor * weight_sensitivity # [0 a 1]
+    amplification_factor = performance_factor * weight_sensitivity 
 
     # Mappatura Selettori (0-4)
     map_pref = {"Minima": 0, "Moderata": 1, "Bilanciata": 2, "Elevata": 3, "Massima": 4}
     score_shock = map_pref[shock_preference]
     score_drive = map_pref[drive_preference]
 
-    # --- CALCOLO PESI MPI FINALI ---
+    # Calcolo pesi euristici
+    w_shock, w_energy, w_flex, w_weight = 1.0, 1.0, 1.0, 1.0
     
-    # 1. Shock: Base + Preferenza + Sensibilità al Peso Corporeo
+    # [Modifica logica per W]
     w_shock = (0.5 + score_shock * 1.0) + (1.5 * weight_sensitivity)
-    
-    # 2. Energy/Flex: Base + Preferenza + Pace + Amplificazione Biomeccanica (Effetto Carico Veloce)
     w_energy = (0.5 + score_drive * 1.0) + (1.5 * performance_factor) + (1.0 * amplification_factor)
     w_flex = (0.5 + score_drive * 1.0) + (1.0 * performance_factor) + (0.5 * amplification_factor)
-    
-    # 3. Weight: Base + Priorità Utente (Diretta)
     w_weight = 0.5 + (weight_priority / 100.0) * 3.5
 
     # Clamp e Normalizzazione
@@ -178,7 +169,8 @@ if check_password():
         c4.metric("Leggerezza", f"{pct_weight:.0f} %")
 
     # --- CALCOLO MPI REALE ---
-    w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
+    w_mid = 1.0 - (heel_pct / 100.0)
+    w_heel_val = heel_pct / 100.0
     
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
@@ -196,8 +188,6 @@ if check_password():
         df_filt["ValueIndex"] = safe_norm(v_raw).round(2)
     else:
         df_filt["ValueIndex"] = 0.0
-        
-# ... (Il resto dello script Step 1.5, 2, 3, 4 continua) ...
 
     # ============================================
     # 1.5 BEST PICK (LEADER)
@@ -226,15 +216,8 @@ if check_password():
         with col_best:
             if not df_budget.empty:
                 
-                # Trova il Best Pick (Leader)
-                top_picks_all = df_budget.sort_values(by="MPI_B", ascending=False)
-                top_pick_label = top_picks_all.iloc[0]['label']
-                
-                cols_simil = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
-                simili_raw = trova_scarpe_simili(df_budget, top_pick_label, cols_simil, n_simili=3)
-                
-                # Costruisci il Podio: Leader (Max MPI) + 2 Modelli Più Simili al Leader
-                top_picks = pd.concat([top_picks_all[top_picks_all['label'] == top_pick_label].head(1), simili_raw.head(2)], ignore_index=True)
+                # 1. Trova il Best Pick (Leader)
+                top_picks = df_budget.sort_values(by="MPI_B", ascending=False).head(3) 
                 
                 best_pick_label = top_picks.iloc[0]['label']
                 rank_labels = ["🥇 1° Posto", "🥈 2° Posto", "🥉 3° Posto"]
@@ -242,8 +225,6 @@ if check_password():
                 cols_podium = st.columns(3)
                 
                 for i, (idx, bp) in enumerate(top_picks.iterrows()):
-                    if i >= 3: break
-                    
                     with cols_podium[i]:
                         with st.container(border=True):
                             st.markdown(f"#### {rank_labels[i]}")
