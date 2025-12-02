@@ -19,38 +19,51 @@ if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
     st.markdown("**Advanced Footwear Technology Analysis Tool**")
 
-    # --- EXPANDERs (Documentazione) ---
+    # --- EXPANDERs (Documentazione) - CONTENUTO RICHIESTO DALL'UTENTE ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
         **1. Rigidità Longitudinale (Flex Index)**
-        Il database misura la **Forza (N)** necessaria per flettere la suola di 30°.
+        Il database misura la **Forza (N)** necessaria per flettere la suola di 30°. Il punteggio segue una modellazione non lineare.
+        * **Logica:** Le scarpe da gara premiano la rigidità elevata; quelle da allenamento cercano un valore moderato per comfort.
         * *Fonte:* **Rodrigo-Carranza et al. (2022).** *The effects of footwear midsole longitudinal bending stiffness on running economy...*
         
         **2. Costo Metabolico del Peso (Weight Efficiency)**
-        *Ogni 100g di massa aggiuntiva aumentano il costo energetico dell'1%.*
+        *Ogni 100g di massa aggiuntiva aumentano il costo energetico dell'1%.* La funzione di penalità del peso segue un decadimento esponenziale.
         * *Fonte:* **Teunissen, Grabowski & Kram (2007).** *Effects of independently altering body weight and body mass on the metabolic cost of running.*
         
         **3. Indice di Spinta Meccanica (Drive Index)**
-        Sinergia tra Piastra, Rocker e Rigidità ("Teeter-Totter effect").
+        La performance deriva dall'interazione ("Teeter-Totter effect") tra la piastra, la geometria Rocker e la rigidità.
         * *Fonte:* **Ghanbari et al. (2025).** *Effects of the curved carbon fibre plate and PEBA foam on the energy cost of running...*
         
         **4. Stack Height e Stabilità**
-        Lo stack alto (>40mm) riduce la stabilità dinamica se non compensato.
+        Lo stack alto (>40mm) può compromettere la stabilità biomeccanica se non adeguatamente compensato.
         * *Fonte:* **Kettner et al. (2025).** *The effects of running shoe stack height on running style and stability...*
         """)
 
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
-        Il calcolo del punteggio totale **MPI-B** (Mescola Performance Index) è una somma pesata di 5 indici normalizzati $[0, 1]$.
+        Il calcolo del punteggio totale **MPI-B** è una somma pesata di 5 indici normalizzati $[0, 1]$.
+        
+        ### 1. Flex Index ($I_{Flex}$)
+        Basato sulla **Forza di Flessione ($F_N$)** in Newton (Range 5N - 40N).
+        * **Race (Modello Sigmoide):** Premia la rigidità alta (> 18N).
+          $$ I_{Flex} = \frac{1}{1 + e^{-(F_N - 18)/2.5}} $$
+        * **Daily (Modello Gaussiano):** Premia il comfort (~12N).
+          $$ I_{Flex} = e^{-\frac{(F_N - 12)^2}{2 \cdot 5^2}} $$
 
-        ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
-        * **Race:** Sigmoide centrata su 18N.
-        * **Daily:** Gaussiana centrata su 12N.
+        ### 2. Drive Index ($I_{Drive}$) - "Teeter-Totter Effect"
+        Modella la spinta come **interazione moltiplicativa** (effetto leva) tra i componenti meccanici, sommata al contributo del materiale.
+        $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiff}) + 0.4 \cdot I_{Energy} $$
+        * $S_{Plate}$: 1.0 (Carbonio), 0.7 (Vetro), 0.5 (Plastica).
+        * $S_{Rocker}$: Altezza punta normalizzata su 10mm.
+        * $S_{Stiff}$: Rigidità normalizzata su 35N ($F_N / 35$).
 
-        ### 2. Drive Index ($I_{Drive}$)
-        Modella l'effetto leva.
-        $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiffness}) + 0.4 \cdot S_{Foam} $$
+        ### 3. Weight Efficiency ($I_{Weight}$)
+        Decadimento esponenziale basato sul costo metabolico (+1% per +100g).
+        $$ I_{Weight} = e^{-0.005 \cdot (Peso_{g} - 180)} $$
+        *(Penalizza progressivamente i pesi superiori a 180g)*.
         """)
+    # --- FINE EXPANDERs RICHIESTI ---
 
     # --- CARICAMENTO DATI ---
     file_name = "database_completo_AFT_20251124_clean.csv"
@@ -162,7 +175,7 @@ if check_password():
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
-    # MPI include SOLO metriche di performance (non durabilità)
+    # MPI include SOLO metriche di performance (come richiesto)
     df_filt.loc[:, "MPI_B"] = (
         (w_shock * df_filt["ShockIndex_calc"] + 
          w_energy * df_filt["EnergyIndex_calc"] + 
@@ -178,11 +191,11 @@ if check_password():
         df_filt["ValueIndex"] = 0.0
 
     # ============================================
-    # 1.5 BEST PICK (LEADER)
+    # 1.5 BEST PICK (PODIO)
     # ============================================
 
     st.markdown("---")
-    st.header("💡 Best Pick: Il Leader per il tuo Budget")
+    st.header("💡 Best Pick: Il Podio per il tuo Budget")
     
     best_pick_label = None
 
@@ -204,25 +217,30 @@ if check_password():
         with col_best:
             if not df_budget.empty:
                 
-                # Trova il Best Pick (Leader) basato SOLO su MPI
-                bp = df_budget.sort_values(by="MPI_B", ascending=False).iloc[0]
-                best_pick_label = bp['label']
+                # Trova i Top 3 basati SOLO sull'MPI (Logica Podio Pura)
+                top_picks = df_budget.sort_values(by="MPI_B", ascending=False).head(3)
                 
-                with st.container(border=True):
-                    k1, k2 = st.columns([3, 1])
-                    with k1:
-                        st.subheader(f"🏆 {bp['marca']} {bp['modello']}")
-                        st.write(f"Best in Class (< {budget_max}€)")
-                        if pd.notna(bp.get('versione')):
-                            st.caption(f"Versione: {int(bp['versione'])}")
-
-                    with k2:
-                        st.metric("MPI Score", f"{bp['MPI_B']:.2f}")
-                        st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
-                        
-                        if pd.notna(bp.get('ValueIndex')):
-                            stars = render_stars(bp['ValueIndex'])
-                            st.caption(f"Value: {stars}")
+                if not top_picks.empty:
+                    best_pick_label = top_picks.iloc[0]['label']
+                    rank_labels = ["🥇 1° Posto", "🥈 2° Posto", "🥉 3° Posto"]
+                    
+                    cols_podium = st.columns(3)
+                    
+                    for i, (idx, bp) in enumerate(top_picks.iterrows()):
+                        with cols_podium[i]:
+                            with st.container(border=True):
+                                st.markdown(f"#### {rank_labels[i]}")
+                                st.subheader(f"{bp['marca']} {bp['modello']}")
+                                
+                                if pd.notna(bp.get('versione')):
+                                    st.caption(f"Versione: {int(bp['versione'])}")
+                                
+                                st.write(f"MPI Score: **{bp['MPI_B']:.2f}**")
+                                st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
+                                
+                                if pd.notna(bp.get('ValueIndex')):
+                                    stars = render_stars(bp['ValueIndex'])
+                                    st.caption(f"Value: {stars}")
             else:
                 st.warning("Nessun risultato nel range di budget.")
 
@@ -279,7 +297,7 @@ if check_password():
                 st.metric("MPI", f"{row['MPI_B']:.2f}")
                 st.write(f"**Value:** {row['ValueIndex']:.2f} {render_stars(row['ValueIndex'])}")
                 
-                # SEZIONE EXTRA INFO
+                # SEZIONE EXTRA INFO (Durability & Fit)
                 st.markdown("---")
                 st.markdown("#### ℹ️ Info Extra")
                 
@@ -290,14 +308,14 @@ if check_password():
                 # Durabilità
                 if 'DurabilityIndex' in row:
                     dur_val = float(row['DurabilityIndex'])
-                    # Etichetta descrittiva
-                    dur_desc = "Eccellente" if dur_val > 0.8 else "Media" if dur_val > 0.5 else "Bassa"
+                    dur_desc = "Eccellente 💎" if dur_val > 0.8 else "Buona 👍" if dur_val > 0.65 else "Media ⚙️" if dur_val > 0.4 else "Bassa ⚠️"
                     st.write(f"🛡️ **Durabilità Stimata:** {dur_desc} ({dur_val:.2f})")
                     st.progress(dur_val)
 
             with c2:
                 st.write(f"Peso: {row['peso']}g | Cluster: {row['ClusterDescrizione']}")
                 
+                # Indici di performance parziali
                 colA, colB = st.columns(2)
                 colA.progress(row['ShockIndex_calc'], text=f"Shock: {row['ShockIndex_calc']:.2f}")
                 colB.progress(row['EnergyIndex_calc'], text=f"Energy: {row['EnergyIndex_calc']:.2f}")
@@ -310,6 +328,7 @@ if check_password():
         cols_sim = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
         sim_weights = [w_shock, w_energy, w_flex, w_weight, w_drive]
         
+        # Trova 2 scarpe simili basate sui pesi MPI
         simili = trova_scarpe_simili(df_filt, sel_input, cols_sim, weights=sim_weights, n_simili=2)
         
         if not simili.empty:
@@ -320,7 +339,7 @@ if check_password():
                         st.markdown(f"**Alternativa {i+1}: {s_row['label']}**")
                         st.caption(f"Distanza Biomeccanica: {s_row['distanza_similitudine']:.2f}")
                         
-                        # Mostra info extra per confronto rapido
+                        # Info extra per confronto rapido
                         fit_info = s_row.get('FitClass', 'N/D')
                         dur_val_sim = s_row.get('DurabilityIndex', 0)
                         st.caption(f"Fit: {fit_info} | Durata: {dur_val_sim:.2f}")
@@ -328,7 +347,7 @@ if check_password():
             df_rad = pd.concat([df_filt[df_filt['label']==sel_input], simili], ignore_index=True)
             st.plotly_chart(plot_radar_comparison_plotly_styled(df_rad, cols_sim), use_container_width=True)
         else:
-            st.warning("Nessun dato con i filtri attuali.")
+            st.warning("Nessun modello simile trovato con i filtri attuali.")
         
         # Tabella Controllo
         st.markdown("---")
