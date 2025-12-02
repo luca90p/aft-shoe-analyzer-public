@@ -4,6 +4,60 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
 
+def calcola_durability_index(df: pd.DataFrame) -> pd.DataFrame:
+    """ 
+    Calcola un indice di durabilità (0-1).
+    - Suola: Misura del danno in mm (Minore è meglio).
+    - Tomaia/Tallone: Voto di resistenza 1-5 (5 è Ottimo, 1 è Pessimo).
+    """
+    
+    # 1. Durabilità Suola (Wear Ratio)
+    # Logica: Profondità Danno (mm) / Spessore Suola (mm).
+    # Più il rapporto è basso, più la suola resiste all'abrasione.
+    wear_depth = pd.to_numeric(df['resistenza_suola'], errors='coerce')
+    thickness = pd.to_numeric(df['spessore_suola'], errors='coerce').replace(0, 0.1) # Evita div/0
+    
+    # Calcolo usura relativa
+    wear_ratio = wear_depth / thickness
+    
+    # Normalizzazione Inversa: 0 danno = 1.0 score
+    S_Suola = 1.0 - (wear_ratio / 0.8)
+    S_Suola = S_Suola.clip(0, 1)
+
+    # 2. Durabilità Tomaia e Tallone (Scala 1-5)
+    # CORREZIONE: 5 = Ottimo (Resistente), 1 = Pessimo (Fragile)
+    def norm_resistance_score(col_name):
+        val = pd.to_numeric(df[col_name], errors='coerce').fillna(3) # Default medio
+        # Normalizzazione Diretta:
+        # 1 -> 0.0
+        # 5 -> 1.0
+        norm = (val - 1) / 4.0
+        return norm.clip(0, 1)
+        
+    S_Tomaia = norm_resistance_score('resistenza_tomaia')
+    S_Tallone = norm_resistance_score('resistenza_tendach')
+
+    # 3. Durability Index Ponderato
+    # La suola pesa il 60% (è quella che si consuma prima correndo)
+    df['DurabilityIndex'] = (0.60 * S_Suola) + (0.25 * S_Tomaia) + (0.15 * S_Tallone)
+    
+    return df
+
+def calcola_fit_class(df: pd.DataFrame) -> pd.DataFrame:
+    """ Classifica la calzata (Stretta/Standard/Ampia). """
+    width = pd.to_numeric(df['larghezza_dita'], errors='coerce')
+    mean_w = width.mean()
+    std_w = width.std()
+    
+    def classify(w):
+        if pd.isna(w): return "N/D"
+        if w < (mean_w - 0.5 * std_w): return "Stretta 🤏"
+        if w > (mean_w + 0.5 * std_w): return "Ampia ↔️"
+        return "Standard 👌"
+        
+    df['FitClass'] = width.apply(classify)
+    return df
+
 def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
     """ Calcola il 'Drive Index' (0-1). """
     def score_plate(val):
@@ -40,7 +94,7 @@ def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
-    """ Calcola gli indici biomeccanici. """
+    """ Calcola tutti gli indici biomeccanici. """
     def safe_minmax(x: pd.Series) -> pd.Series:
         x = x.astype(float)
         xmin = np.nanmin(x)
@@ -91,8 +145,11 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df["StackFactor"] = StabilityMod
     df["EnergyIndex"] = df["EnergyIndex"] * StabilityMod
 
-    # 5. Drive Index
+    # 5. Drive, Durability, Fit
     df = calcola_drive_index(df)
+    df = calcola_durability_index(df)
+    df = calcola_fit_class(df)
+    
     return df
 
 def calcola_MPIB(df: pd.DataFrame) -> pd.DataFrame:
@@ -118,12 +175,10 @@ def esegui_clustering(df: pd.DataFrame):
 
     def descrizione_cluster_simplificata(row: pd.Series) -> str:
         shock  = livello_index(row["Shock"])
-        energy = livello_index(row["Energy"])
+        drive  = livello_index(row["Drive"])
         flex   = livello_index(row["Flex"])
         weight = livello_index(row["Weight"])
-        drive  = livello_index(row["Drive"])
-        return (f"Shock: {shock} | Drive: {drive} | "
-                f"Flex: {flex} | Peso: {weight}")
+        return (f"Shock: {shock} | Drive: {drive} | Flex: {flex} | Peso: {weight}")
 
     rng = 42
     np.random.seed(rng)
@@ -162,11 +217,7 @@ def esegui_clustering(df: pd.DataFrame):
 
     return df, cluster_summary
 
-# --- FIX: Funzione aggiornata per accettare 'weights' ---
 def trova_scarpe_simili(df, target_label, metrics_cols, weights=None, n_simili=3):
-    """
-    Trova le n scarpe più simili. Se weights è fornito, calcola la Distanza Euclidea Pesata.
-    """
     try:
         target_vector = df.loc[df['label'] == target_label, metrics_cols].astype(float).values[0]
         df_calc = df.copy()
@@ -174,18 +225,14 @@ def trova_scarpe_simili(df, target_label, metrics_cols, weights=None, n_simili=3
         vectors = df_calc[metrics_cols].astype(float).values
         
         if weights is not None:
-            # Distanza Euclidea Pesata
             w = np.array(weights)
-            # Assicuriamoci che w sia normalizzato per non falsare la scala
             w = w / w.sum()
             diff_sq = (vectors - target_vector) ** 2
             distances = np.sqrt((diff_sq * w).sum(axis=1))
         else:
-            # Distanza Standard
             distances = np.linalg.norm(vectors - target_vector, axis=1)
             
         df_calc['distanza_similitudine'] = distances
-        
         simili = df_calc[df_calc['label'] != target_label].sort_values('distanza_similitudine').head(n_simili)
         return simili
     except Exception:
