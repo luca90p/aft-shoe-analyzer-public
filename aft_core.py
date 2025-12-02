@@ -1,44 +1,36 @@
-# aft_core.py
+# aft_core.py (Versione Corretta)
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
 
+# --- FUNZIONI DI SUPPORTO PER NUOVI INDICI ---
+
 def calcola_durability_index(df: pd.DataFrame) -> pd.DataFrame:
     """ 
     Calcola un indice di durabilità (0-1).
-    - Suola: Misura del danno in mm (Minore è meglio).
-    - Tomaia/Tallone: Voto di resistenza 1-5 (5 è Ottimo, 1 è Pessimo).
     """
-    
     # 1. Durabilità Suola (Wear Ratio)
-    # Logica: Profondità Danno (mm) / Spessore Suola (mm).
-    # Più il rapporto è basso, più la suola resiste all'abrasione.
     wear_depth = pd.to_numeric(df['resistenza_suola'], errors='coerce')
-    thickness = pd.to_numeric(df['spessore_suola'], errors='coerce').replace(0, 0.1) # Evita div/0
+    thickness = pd.to_numeric(df['spessore_suola'], errors='coerce').replace(0, 0.1)
     
-    # Calcolo usura relativa
     wear_ratio = wear_depth / thickness
     
-    # Normalizzazione Inversa: 0 danno = 1.0 score
+    # Normalizzazione Inversa (0 danno = 1.0 score)
     S_Suola = 1.0 - (wear_ratio / 0.8)
     S_Suola = S_Suola.clip(0, 1)
 
     # 2. Durabilità Tomaia e Tallone (Scala 1-5)
-    # CORREZIONE: 5 = Ottimo (Resistente), 1 = Pessimo (Fragile)
     def norm_resistance_score(col_name):
-        val = pd.to_numeric(df[col_name], errors='coerce').fillna(3) # Default medio
-        # Normalizzazione Diretta:
-        # 1 -> 0.0
-        # 5 -> 1.0
+        val = pd.to_numeric(df[col_name], errors='coerce').fillna(3)
+        # 1 -> 0.0, 5 -> 1.0
         norm = (val - 1) / 4.0
         return norm.clip(0, 1)
         
     S_Tomaia = norm_resistance_score('resistenza_tomaia')
     S_Tallone = norm_resistance_score('resistenza_tendach')
 
-    # 3. Durability Index Ponderato
-    # La suola pesa il 60% (è quella che si consuma prima correndo)
+    # Peso ponderato
     df['DurabilityIndex'] = (0.60 * S_Suola) + (0.25 * S_Tomaia) + (0.15 * S_Tallone)
     
     return df
@@ -93,8 +85,10 @@ def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
     
     return df
 
+# --- FUNZIONE PRINCIPALE ---
+
 def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
-    """ Calcola tutti gli indici biomeccanici. """
+    """ Calcola TUTTI gli indici biomeccanici e fisici. """
     def safe_minmax(x: pd.Series) -> pd.Series:
         x = x.astype(float)
         xmin = np.nanmin(x)
@@ -145,8 +139,10 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df["StackFactor"] = StabilityMod
     df["EnergyIndex"] = df["EnergyIndex"] * StabilityMod
 
-    # 5. Drive, Durability, Fit
+    # 5. Drive Index
     df = calcola_drive_index(df)
+    
+    # 6. AGGIUNTA CRUCIALE: Chiamata alle funzioni Durabilità e Fit
     df = calcola_durability_index(df)
     df = calcola_fit_class(df)
     
