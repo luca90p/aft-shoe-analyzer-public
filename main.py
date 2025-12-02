@@ -38,7 +38,16 @@ if check_password():
         **4. Stack Height e Stabilità**
         Lo stack alto (>40mm) può compromettere la stabilità biomeccanica se non adeguatamente compensato.
         * *Fonte:* **Kettner et al. (2025).** *The effects of running shoe stack height on running style and stability...*
+
+        **5. Indice di Durabilità (Durability Index)**
+        Questo indice sintetico (0-1) stima la longevità della scarpa combinando tre fattori di resistenza all'abrasione:
+        * **Suola:** Calcolato come rapporto tra la profondità del danno abrasivo e lo spessore totale della gomma (Wear Ratio).
+        * **Tomaia e Tallone:** Basato su test qualitativi di resistenza all'usura (scala standardizzata).
+
+        **6. Analisi Volumetrica della Calzata (Fit Class)**
+        La classificazione (Stretta, Standard, Ampia) è determinata statisticamente analizzando la distribuzione normale delle larghezze del toe-box (zona dita) dell'intero database. I modelli che deviano di oltre 0.5 deviazioni standard dalla media vengono classificati come Stretti o Ampi.
         """)
+        
 
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
@@ -62,6 +71,10 @@ if check_password():
         Decadimento esponenziale basato sul costo metabolico (+1% per +100g).
         $$ I_{Weight} = e^{-0.005 \cdot (Peso_{g} - 180)} $$
         *(Penalizza progressivamente i pesi superiori a 180g)*.
+        
+        ### 4. Durability Index ($I_{Dur}$)
+        Combinazione pesata dei tassi di usura.
+        $$ I_{Dur} = 0.6 \cdot (1 - \frac{Danno_{suola}}{Spessore_{suola}}) + 0.25 \cdot Res_{Tomaia} + 0.15 \cdot Res_{Tallone} $$
         """)
     # --- FINE EXPANDERs RICHIESTI ---
 
@@ -366,10 +379,11 @@ if check_password():
         else:
             st.warning("Nessun modello simile trovato con i filtri attuali.")
         
-        # Tabella Controllo
+        # --- TABELLA CONTROLLO ---
         st.markdown("---")
-        with st.expander("📊 Tabella di Controllo Completa"):
-            cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StackFactor", "DurabilityIndex", "FitClass"]
+        with st.expander("Tabella Dati Completa (Tutti gli Indici)"):
+            cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "DurabilityIndex", "FitClass", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
             if PRICE_COL: cols_ctrl.append(PRICE_COL)
             st.dataframe(df_filt[[c for c in cols_ctrl if c in df_filt.columns]], use_container_width=True)
+
 
