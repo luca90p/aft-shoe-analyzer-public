@@ -19,7 +19,7 @@ if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
     st.markdown("**Advanced Footwear Technology Analysis Tool**")
 
-    # --- EXPANDER METODOLOGIA ---
+    # --- EXPANDERs (Documentazione) ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
         **1. Rigidità Longitudinale (Flex Index)**
@@ -40,29 +40,17 @@ if check_password():
         * *Fonte:* **Kettner et al. (2025).** *The effects of running shoe stack height on running style and stability...*
         """)
 
-    # --- EXPANDER FORMULE (AGGIORNATO) ---
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
-        Il calcolo del punteggio totale **MPI-B** è una somma pesata di 5 indici normalizzati $[0, 1]$.
-        
-        ### 1. Flex Index ($I_{Flex}$)
-        Basato sulla **Forza di Flessione ($F_N$)** in Newton (Range 5N - 40N).
-        * **Race (Modello Sigmoide):** Premia la rigidità alta (> 18N).
-          $$ I_{Flex} = \frac{1}{1 + e^{-(F_N - 18)/2.5}} $$
-        * **Daily (Modello Gaussiano):** Premia il comfort (~12N).
-          $$ I_{Flex} = e^{-\frac{(F_N - 12)^2}{2 \cdot 5^2}} $$
+        Il calcolo del punteggio totale MPI-B si basa su una somma pesata di 5 indici normalizzati $[0, 1]$.
 
-        ### 2. Drive Index ($I_{Drive}$) - "Teeter-Totter Effect"
-        Modella la spinta come **interazione moltiplicativa** (effetto leva) tra i componenti meccanici, sommata al contributo del materiale.
-        $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiff}) + 0.4 \cdot I_{Energy} $$
-        * $S_{Plate}$: 1.0 (Carbonio), 0.7 (Vetro), 0.5 (Plastica).
-        * $S_{Rocker}$: Altezza punta normalizzata su 10mm.
-        * $S_{Stiff}$: Rigidità normalizzata su 35N ($F_N / 35$).
+        ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
+        * **Race:** Sigmoide centrata su 18N.
+        * **Daily:** Gaussiana centrata su 12N.
 
-        ### 3. Weight Efficiency ($I_{Weight}$)
-        Decadimento esponenziale basato sul costo metabolico (+1% per +100g).
-        $$ I_{Weight} = e^{-0.005 \cdot (Peso_{g} - 180)} $$
-        *(Penalizza progressivamente i pesi superiori a 180g)*.
+        ### 2. Drive Index ($I_{Drive}$)
+        Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
+        $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiffness}) + 0.4 \cdot S_{Foam} $$
         """)
 
     # --- CARICAMENTO DATI ---
@@ -100,16 +88,23 @@ if check_password():
     col_obiettivi, col_preferenze = st.columns(2)
 
     with col_obiettivi:
-        st.subheader("🎯 Obiettivo e Stile")
-        run_type = st.select_slider(
-            "Per cosa userai queste scarpe?",
-            options=["Recupero / Easy", "Lungo Lento", "Allenamento Quotidiano", "Tempo / Ripetute", "Gara / PB"],
-            value="Allenamento Quotidiano"
+        st.subheader("🎯 Fisico e Obiettivo")
+        
+        # INPUT 1: Peso Corporeo
+        user_weight_kg = st.slider(
+            "Massa Corporea Attuale (kg):",
+            min_value=50, max_value=120, value=75, step=5
         )
+        
+        # INPUT 2: Pace Target
+        target_pace_sec_km = st.slider(
+            "Passo Medio Target (secondi/km):",
+            min_value=180, max_value=420, value=300, step=10
+        )
+        
         weight_priority = st.slider(
             "Importanza della leggerezza:",
-            min_value=0, max_value=100, value=50, step=10,
-            help="0% = Priorità protezione. 100% = Priorità efficienza."
+            min_value=0, max_value=100, value=50, step=10
         )
 
     with col_preferenze:
@@ -118,40 +113,50 @@ if check_password():
         shock_preference = st.select_slider(
             "Ammortizzazione e Protezione (Shock):",
             options=["Minima", "Moderata", "Bilanciata", "Elevata", "Massima"],
-            value="Bilanciata",
-            help="Quanto vuoi che la scarpa assorba l'impatto (Dumping)."
+            value="Bilanciata"
         )
         
         drive_preference = st.select_slider(
             "Reattività e Spinta (Drive/Energy):",
             options=["Minima", "Moderata", "Bilanciata", "Elevata", "Massima"],
-            value="Bilanciata",
-            help="Quanto vuoi che la scarpa restituisca energia e spinga in avanti."
+            value="Bilanciata"
         )
         
         heel_pct = st.slider(
             "Percentuale di appoggio del tallone:",
-            min_value=0, max_value=100, value=40, step=10,
-            help="0% = Avampiede puro. 100% = Tallone puro."
+            min_value=0, max_value=100, value=40, step=10
         )
 
-    # --- MOTORE DI TRADUZIONE (USER -> TECH) ---
-    map_goal = {"Recupero / Easy": 0, "Lungo Lento": 1, "Allenamento Quotidiano": 2, "Tempo / Ripetute": 3, "Gara / PB": 4}
-    score_goal = map_goal[run_type] 
+    # --- MOTORE DI TRADUZIONE (PESO/PACE -> TECH) ---
+    
+    # 1. Fattore di Performance (0=Lento a 1=Veloce)
+    P_min_s = 180; P_max_s = 420
+    performance_factor = 1.0 - (target_pace_sec_km - P_min_s) / (P_max_s - P_min_s)
+    performance_factor = np.clip(performance_factor, 0, 1)
 
+    # 2. Sensibilità al Peso Corporeo (Range 60kg -> 100kg)
+    W_min_sens = 60; W_max_sens = 100
+    weight_sensitivity = (user_weight_kg - W_min_sens) / (W_max_sens - W_min_sens)
+    weight_sensitivity = np.clip(weight_sensitivity, 0, 1) 
+
+    # 3. Fattore di Amplificazione Biomeccanica (MAX se Massivo E Veloce)
+    amplification_factor = performance_factor * weight_sensitivity 
+
+    # Mappatura Selettori (0-4)
     map_pref = {"Minima": 0, "Moderata": 1, "Bilanciata": 2, "Elevata": 3, "Massima": 4}
     score_shock = map_pref[shock_preference]
     score_drive = map_pref[drive_preference]
 
     # Calcolo pesi euristici
     w_shock, w_energy, w_flex, w_weight = 1.0, 1.0, 1.0, 1.0
-    w_shock -= score_goal * 0.3; w_energy += score_goal * 0.8; w_flex += score_goal * 0.6
-    if score_shock == 0: w_shock += 0.5; w_energy -= 0.5; w_flex -= 0.5
-    elif score_shock == 4: w_shock += 1.5; w_energy -= 0.5
-    if score_drive == 0: w_energy -= 0.5; w_flex -= 0.5
-    elif score_drive == 4: w_energy += 1.5; w_flex += 1.0
     
+    # [Modifica logica per W]
+    w_shock = (0.5 + score_shock * 1.0) + (1.5 * weight_sensitivity)
+    w_energy = (0.5 + score_drive * 1.0) + (1.5 * performance_factor) + (1.0 * amplification_factor)
+    w_flex = (0.5 + score_drive * 1.0) + (1.0 * performance_factor) + (0.5 * amplification_factor)
     w_weight = 0.5 + (weight_priority / 100.0) * 3.5
+
+    # Clamp e Normalizzazione
     w_shock, w_energy, w_flex, w_weight = max(0.1, w_shock), max(0.1, w_energy), max(0.1, w_flex), max(0.1, w_weight)
     total_w = w_shock + w_energy + w_flex + w_weight
     pct_shock, pct_energy, pct_flex, pct_weight = (w_shock / total_w) * 100, (w_energy / total_w) * 100, (w_flex / total_w) * 100, (w_weight / total_w) * 100
@@ -164,7 +169,8 @@ if check_password():
         c4.metric("Leggerezza", f"{pct_weight:.0f} %")
 
     # --- CALCOLO MPI REALE ---
-    w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
+    w_mid = 1.0 - (heel_pct / 100.0)
+    w_heel_val = heel_pct / 100.0
     
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
@@ -188,7 +194,7 @@ if check_password():
     # ============================================
 
     st.markdown("---")
-    st.header("💡 Best Pick: Il Leader per il tuo Budget")
+    st.header("💡 Best Pick: Il Podio per il tuo Budget")
     
     best_pick_label = None
 
@@ -210,28 +216,29 @@ if check_password():
         with col_best:
             if not df_budget.empty:
                 
-                # Trova il Best Pick (Leader)
-                top_picks_all = df_budget.sort_values(by="MPI_B", ascending=False)
-                top_pick_label = top_picks_all.iloc[0]['label']
+                # 1. Trova il Best Pick (Leader)
+                top_picks = df_budget.sort_values(by="MPI_B", ascending=False).head(3) 
                 
-                best_pick_label = top_pick_label
-                bp = top_picks_all.iloc[0]
+                best_pick_label = top_picks.iloc[0]['label']
+                rank_labels = ["🥇 1° Posto", "🥈 2° Posto", "🥉 3° Posto"]
                 
-                with st.container(border=True):
-                    k1, k2 = st.columns([3, 1])
-                    with k1:
-                        st.subheader(f"🏆 {bp['marca']} {bp['modello']}")
-                        st.write(f"Best in Class (< {budget_max}€)")
-                        if pd.notna(bp.get('versione')):
-                            st.caption(f"Versione: {int(bp['versione'])}")
-
-                    with k2:
-                        st.metric("MPI Score", f"{bp['MPI_B']:.2f}")
-                        st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
-                        
-                        if pd.notna(bp.get('ValueIndex')):
-                            stars = render_stars(bp['ValueIndex'])
-                            st.caption(f"Value: {stars}")
+                cols_podium = st.columns(3)
+                
+                for i, (idx, bp) in enumerate(top_picks.iterrows()):
+                    with cols_podium[i]:
+                        with st.container(border=True):
+                            st.markdown(f"#### {rank_labels[i]}")
+                            st.subheader(f"{bp['marca']} {bp['modello']}")
+                            
+                            if pd.notna(bp.get('versione')):
+                                st.caption(f"Versione: {int(bp['versione'])}")
+                            
+                            st.write(f"MPI Score: **{bp['MPI_B']:.2f}**")
+                            st.write(f"Prezzo: **{bp[PRICE_COL]:.0f} €**")
+                            
+                            if pd.notna(bp.get('ValueIndex')):
+                                stars = render_stars(bp['ValueIndex'])
+                                st.caption(f"Value: {stars}")
             else:
                 st.warning("Nessun risultato nel range di budget.")
 
