@@ -19,11 +19,12 @@ if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
     st.markdown("**Advanced Footwear Technology Analysis Tool**")
 
-    # --- EXPANDERs ---
+    # --- EXPANDER METODOLOGIA ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
         **1. Rigidità Longitudinale (Flex Index)**
         Il database misura la **Forza (N)** necessaria per flettere la suola di 30°. Il punteggio segue una modellazione non lineare.
+        * **Logica:** Le scarpe da gara premiano la rigidità elevata; quelle da allenamento cercano un valore moderato per comfort.
         * *Fonte:* **Rodrigo-Carranza et al. (2022).** *The effects of footwear midsole longitudinal bending stiffness on running economy...*
         
         **2. Costo Metabolico del Peso (Weight Efficiency)**
@@ -33,18 +34,35 @@ if check_password():
         **3. Indice di Spinta Meccanica (Drive Index)**
         La performance deriva dall'interazione ("Teeter-Totter effect") tra la piastra, la geometria Rocker e la rigidità.
         * *Fonte:* **Ghanbari et al. (2025).** *Effects of the curved carbon fibre plate and PEBA foam on the energy cost of running...*
+        
+        **4. Stack Height e Stabilità**
+        Lo stack alto (>40mm) può compromettere la stabilità biomeccanica se non adeguatamente compensato.
+        * *Fonte:* **Kettner et al. (2025).** *The effects of running shoe stack height on running style and stability...*
         """)
 
+    # --- EXPANDER FORMULE (AGGIORNATO) ---
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
-        Il calcolo del punteggio totale MPI-B si basa su una somma pesata di 5 indici normalizzati $[0, 1]$.
-        ### 1. Flex Index ($I_{Flex}$) - Range 5-40 N
-        * **Race:** Sigmoide centrata su 18N.
-        * **Daily:** Gaussiana centrata su 12N.
+        Il calcolo del punteggio totale **MPI-B** è una somma pesata di 5 indici normalizzati $[0, 1]$.
+        
+        ### 1. Flex Index ($I_{Flex}$)
+        Basato sulla **Forza di Flessione ($F_N$)** in Newton (Range 5N - 40N).
+        * **Race (Modello Sigmoide):** Premia la rigidità alta (> 18N).
+          $$ I_{Flex} = \frac{1}{1 + e^{-(F_N - 18)/2.5}} $$
+        * **Daily (Modello Gaussiano):** Premia il comfort (~12N).
+          $$ I_{Flex} = e^{-\frac{(F_N - 12)^2}{2 \cdot 5^2}} $$
 
-        ### 2. Drive Index ($I_{Drive}$)
-        Modella l'effetto leva ("Teeter-Totter"). La componente meccanica è una moltiplicazione (interazione), non una somma.
-        $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiffness}) + 0.4 \cdot S_{Foam} $$
+        ### 2. Drive Index ($I_{Drive}$) - "Teeter-Totter Effect"
+        Modella la spinta come **interazione moltiplicativa** (effetto leva) tra i componenti meccanici, sommata al contributo del materiale.
+        $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiff}) + 0.4 \cdot I_{Energy} $$
+        * $S_{Plate}$: 1.0 (Carbonio), 0.7 (Vetro), 0.5 (Plastica).
+        * $S_{Rocker}$: Altezza punta normalizzata su 10mm.
+        * $S_{Stiff}$: Rigidità normalizzata su 35N ($F_N / 35$).
+
+        ### 3. Weight Efficiency ($I_{Weight}$)
+        Decadimento esponenziale basato sul costo metabolico (+1% per +100g).
+        $$ I_{Weight} = e^{-0.005 \cdot (Peso_{g} - 180)} $$
+        *(Penalizza progressivamente i pesi superiori a 180g)*.
         """)
 
     # --- CARICAMENTO DATI ---
@@ -134,25 +152,16 @@ if check_password():
     elif score_drive == 4: w_energy += 1.5; w_flex += 1.0
     
     w_weight = 0.5 + (weight_priority / 100.0) * 3.5
-    
-    # Calcolo peso per Drive (derivato da Energy/Flex)
-    # Se l'utente cerca Reattività (score_drive) e Gara (score_goal), il Drive pesa di più
-    w_drive = 1.0 + (score_drive * 0.5) + (score_goal * 0.4)
-    
-    # Clamp e Normalizzazione
-    w_shock, w_energy, w_flex, w_weight, w_drive = max(0.1, w_shock), max(0.1, w_energy), max(0.1, w_flex), max(0.1, w_weight), max(0.1, w_drive)
+    w_shock, w_energy, w_flex, w_weight = max(0.1, w_shock), max(0.1, w_energy), max(0.1, w_flex), max(0.1, w_weight)
     total_w = w_shock + w_energy + w_flex + w_weight
-    
-    # Pesi visuali (solo per il display)
     pct_shock, pct_energy, pct_flex, pct_weight = (w_shock / total_w) * 100, (w_energy / total_w) * 100, (w_flex / total_w) * 100, (w_weight / total_w) * 100
 
-    with st.expander(f"⚙️ Pesi Tecnici Applicati (Analisi Ponderata)"):
+    with st.expander(f"⚙️ Pesi Tecnici Applicati"):
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Ammortizz.", f"{pct_shock:.0f} %")
         c2.metric("Ritorno Energia", f"{pct_energy:.0f} %")
         c3.metric("Spinta/Rigidità", f"{pct_flex:.0f} %")
         c4.metric("Leggerezza", f"{pct_weight:.0f} %")
-        st.caption(f"*Nota: Il peso 'Drive' per la similitudine è {w_drive:.2f}")
 
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
@@ -200,9 +209,13 @@ if check_password():
         
         with col_best:
             if not df_budget.empty:
-                # Trova il Best Pick (Leader) SOLO in base a MPI
-                bp = df_budget.sort_values(by="MPI_B", ascending=False).iloc[0]
-                best_pick_label = bp['label']
+                
+                # Trova il Best Pick (Leader)
+                top_picks_all = df_budget.sort_values(by="MPI_B", ascending=False)
+                top_pick_label = top_picks_all.iloc[0]['label']
+                
+                best_pick_label = top_pick_label
+                bp = top_picks_all.iloc[0]
                 
                 with st.container(border=True):
                     k1, k2 = st.columns([3, 1])
@@ -223,7 +236,7 @@ if check_password():
                 st.warning("Nessun risultato nel range di budget.")
 
     # ============================================
-    # 2. ANALISI MERCATO
+    # 2. ANALISI MERCATO (UTILIZZA BEST PICK COME DEFAULT)
     # ============================================
 
     st.markdown("---")
@@ -233,16 +246,18 @@ if check_password():
         df_val_sorted = df_filt.sort_values("ValueIndex", ascending=False)
         models = df_val_sorted['label'].tolist()
         
-        # Gestione selezione
+        # 1. Aggiorna lo stato se il Best Pick è stato trovato
         best_pick_label_check = best_pick_label if 'best_pick_label' in locals() and best_pick_label and best_pick_label in models else models[0]
 
         if 'selected_point_key' not in st.session_state:
             st.session_state['selected_point_key'] = best_pick_label_check
         
+        # 2. Aggiorna lo stato se il best pick è diverso dal target attuale
         if best_pick_label_check != st.session_state['selected_point_key']:
              st.session_state['selected_point_key'] = best_pick_label_check
              st.rerun() 
 
+        # 3. Controllo consistenza (fallback)
         curr_sel = st.session_state['selected_point_key']
         if curr_sel not in models:
             curr_sel = models[0]
@@ -282,16 +297,11 @@ if check_password():
                 colA.progress(row['FlexIndex'], text=f"Flex: {row['FlexIndex']:.2f}")
                 colB.progress(row['DriveIndex'], text=f"Drive: {row['DriveIndex']:.2f}")
 
-        # --- STEP 4: SIMILITUDINE (PONDERATA) ---
+        # --- STEP 4: SIMILITUDINE ---
         st.markdown("---")
         st.header("4. Similitudine & Radar")
-        
-        # Definizione pesi per la similitudine (incluso Drive)
-        sim_weights = [w_shock, w_energy, w_flex, w_weight, w_drive]
-        
         cols_sim = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
-        # Passiamo i pesi alla funzione di ricerca
-        simili = trova_scarpe_simili(df_filt, sel_input, cols_sim, weights=sim_weights)
+        simili = trova_scarpe_simili(df_filt, sel_input, cols_sim)
         
         if not simili.empty:
             cc = st.columns(3)
@@ -299,7 +309,7 @@ if check_password():
                 with cc[i]:
                     with st.container(border=True):
                         st.markdown(f"**{s_row['label']}**")
-                        st.caption(f"Distanza (Pesata): {s_row['distanza_similitudine']:.2f}")
+                        st.caption(f"Dist: {s_row['distanza_similitudine']:.2f}")
             
             df_rad = pd.concat([df_filt[df_filt['label']==sel_input], simili], ignore_index=True)
             st.plotly_chart(plot_radar_comparison_plotly_styled(df_rad, cols_sim), use_container_width=True)
