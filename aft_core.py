@@ -6,6 +6,55 @@ from sklearn.metrics import silhouette_samples
 
 # --- FUNZIONI DI SUPPORTO PER NUOVI INDICI ---
 
+# aft_core.py
+import numpy as np
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_samples
+
+# --- NUOVA FUNZIONE STABILITÀ ---
+def calcola_stability_index(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcola un indice di Stabilità (0-1) basato su geometria e rigidità strutturale.
+    Input: Torsione, Rigidità Tallone, Larghezze Suola, Stack Height.
+    """
+    
+    # Helper per normalizzazione sicura (riempie i NaN con la media)
+    def safe_norm_fill(s):
+        s = pd.to_numeric(s, errors='coerce')
+        s = s.fillna(s.mean())
+        return (s - s.min()) / (s.max() - s.min() + 1e-9)
+
+    # 1. Rigidità Strutturale (Torsione e Tallone)
+    # Assumiamo scala 1-5. Normalizziamo: (Val - 1) / 4
+    torsion = pd.to_numeric(df['rigidezza_torsionale'], errors='coerce').fillna(3)
+    heel_stiff = pd.to_numeric(df['rigidezza_tallone'], errors='coerce').fillna(3)
+    
+    S_Torsion = ((torsion - 1) / 4).clip(0, 1)
+    S_HeelStruct = ((heel_stiff - 1) / 4).clip(0, 1)
+
+    # 2. Geometria (Base d'appoggio)
+    # Più larga è la suola, più è stabile
+    S_Width_Mid = safe_norm_fill(df['larghezza_suola_mesop'])
+    S_Width_Heel = safe_norm_fill(df['larghezza_suola_tallone'])
+
+    # 3. Stack Height (Penalità)
+    # Più alta è la scarpa, meno è stabile (baricentro alto).
+    # Invertiamo la normalizzazione: Basso = 1.0, Alto = 0.0
+    S_LowStack = 1.0 - safe_norm_fill(df['altezza_tallone'])
+
+    # 4. Calcolo Ponderato
+    # La torsione e la larghezza al mesopiede sono i driver principali per l'anti-pronazione
+    df['StabilityIndex'] = (
+        0.30 * S_Torsion +
+        0.20 * S_Width_Mid +
+        0.20 * S_Width_Heel +
+        0.15 * S_HeelStruct +
+        0.15 * S_LowStack
+    )
+    
+    return df
+
 def calcola_durability_index(df: pd.DataFrame) -> pd.DataFrame:
     """ 
     Calcola un indice di durabilità (0-1).
@@ -233,3 +282,4 @@ def trova_scarpe_simili(df, target_label, metrics_cols, weights=None, n_simili=3
         return simili
     except Exception:
         return pd.DataFrame()
+
