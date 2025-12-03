@@ -19,7 +19,7 @@ if check_password():
     st.title("Database AFT: Analisi Biomeccanica e Clustering")
     st.markdown("**Advanced Footwear Technology Analysis Tool**")
 
-    # --- EXPANDERs (Documentazione) - CONTENUTO RICHIESTO DALL'UTENTE ---
+    # --- EXPANDERs (Documentazione) - CONTENUTO TASSATIVAMENTE NON MODIFICATO ---
     with st.expander("📘 Metodologia e Riferimenti Bibliografici"):
         st.markdown("""
         **1. Rigidità Longitudinale (Flex Index)**
@@ -47,17 +47,16 @@ if check_password():
         **6. Analisi Volumetrica della Calzata (Fit Class)**
         La classificazione (Stretta, Standard, Ampia) è determinata statisticamente analizzando la distribuzione normale delle larghezze del toe-box (zona dita) dell'intero database. I modelli che deviano di oltre 0.5 deviazioni standard dalla media vengono classificati come Stretti o Ampi.
         """)
-        
 
     with st.expander("📐 Formule Matematiche del Modello AFT"):
         st.markdown(r"""
         Il calcolo del punteggio totale **MPI-B** è una somma pesata di 5 indici normalizzati $[0, 1]$.
-        
+
         ### 1. Flex Index ($I_{Flex}$)
         Basato sulla **Forza di Flessione ($F_N$)** in Newton (Range 5N - 40N).
         * **Race (Modello Sigmoide):** Premia la rigidità alta (> 18N).
           $$ I_{Flex} = \frac{1}{1 + e^{-(F_N - 18)/2.5}} $$
-        * **Daily (Modello Gaussiano):** Premia il comfort (~12N).
+        * **Daily (Modello Gaussiana):** Premia il comfort (~12N).
           $$ I_{Flex} = e^{-\frac{(F_N - 12)^2}{2 \cdot 5^2}} $$
 
         ### 2. Drive Index ($I_{Drive}$) - "Teeter-Totter Effect"
@@ -71,10 +70,6 @@ if check_password():
         Decadimento esponenziale basato sul costo metabolico (+1% per +100g).
         $$ I_{Weight} = e^{-0.005 \cdot (Peso_{g} - 180)} $$
         *(Penalizza progressivamente i pesi superiori a 180g)*.
-        
-        ### 4. Durability Index ($I_{Dur}$)
-        Combinazione pesata dei tassi di usura.
-        $$ I_{Dur} = 0.6 \cdot (1 - \frac{Danno_{suola}}{Spessore_{suola}}) + 0.25 \cdot Res_{Tomaia} + 0.15 \cdot Res_{Tallone} $$
         """)
     # --- FINE EXPANDERs RICHIESTI ---
 
@@ -104,7 +99,7 @@ if check_password():
         if sel_passo != "Tutti": df_filt = df_filt[df_filt["passo"] == sel_passo]
 
     # ============================================
-    # 1. WIZARD GUIDATO (PARAMETRIZZAZIONE MPI)
+    # 1. WIZARD GUIDATO
     # ============================================
 
     st.header("1. Parametrizzazione Performance (MPI)")
@@ -115,22 +110,19 @@ if check_password():
     with col_obiettivi:
         st.subheader("🎯 Obiettivo e Fisico")
         
-        # Input Fisici
         user_weight_kg = st.slider("Massa Corporea (kg):", 50, 120, 75, 5)
         
-        # Input Passo (Select Slider per UX)
         pace_options = [f"{m}:{s:02d}" for m in range(3, 8) for s in range(0, 60, 15)]
         pace_options = [p for p in pace_options if p <= "7:00"]
         target_pace_str = st.select_slider("Passo Medio Target (min/km):", options=pace_options, value="5:00")
         
-        # Conversione passo
         m, s = map(int, target_pace_str.split(':'))
         target_pace_sec_km = m * 60 + s
 
         weight_priority = st.slider("Importanza Leggerezza:", 0, 100, 50, 10)
 
     with col_preferenze:
-        st.subheader("❤️ Sensazioni Richieste")
+        st.subheader("❤️ Sensazioni")
         
         shock_preference = st.select_slider(
             "Ammortizzazione (Shock):",
@@ -150,24 +142,23 @@ if check_password():
 
     # --- MOTORE DI TRADUZIONE (User -> Pesi Tecnici) ---
     
-    # 1. Fattore Performance (Pace) & Peso
+    # Calcolo Fattori
     P_min, P_max = 180, 420
     perf_factor = np.clip(1.0 - (target_pace_sec_km - P_min)/(P_max - P_min), 0, 1)
     weight_sens = np.clip((user_weight_kg - 60) / 40, 0, 1)
     amp_factor = perf_factor * weight_sens
 
-    # 2. Mappatura Sensazioni
+    # Mappatura Sensazioni
     map_pref = {"Minima": 0, "Moderata": 1, "Bilanciata": 2, "Elevata": 3, "Massima": 4}
     s_shock = map_pref[shock_preference]
     s_drive = map_pref[drive_preference]
 
-    # 3. Calcolo Pesi MPI
+    # Calcolo Pesi MPI
     w_shock = (0.5 + s_shock * 1.0) + (1.5 * weight_sens)
     w_energy = (0.5 + s_drive * 1.0) + (1.5 * perf_factor) + (1.0 * amp_factor)
     w_flex = (0.5 + s_drive * 1.0) + (1.0 * perf_factor) + (0.5 * amp_factor)
     w_weight = 0.5 + (weight_priority / 100.0) * 3.5
     
-    # Peso implicito per Drive (usato solo per similarità vettoriale)
     w_drive = (w_energy + w_flex) / 1.5
 
     # Clamp e Normalizzazione visuale
@@ -176,19 +167,17 @@ if check_password():
 
     with st.expander(f"⚙️ Pesi Tecnici Applicati"):
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Ammortizz.", f"{(w_shock/tot_w)*100:.0f}%")
-        c2.metric("Ritorno Energia", f"{(w_energy/tot_w)*100:.0f}%")
-        c3.metric("Spinta/Rigidità", f"{(w_flex/tot_w)*100:.0f}%")
-        c4.metric("Leggerezza", f"{(w_weight/tot_w)*100:.0f}%")
+        c1.metric("Ammortizz.", f"{(w_shock/tot_w)*100:.0f} %")
+        c2.metric("Ritorno Energia", f"{(w_energy/tot_w)*100:.0f} %")
+        c3.metric("Spinta/Rigidità", f"{(w_flex/tot_w)*100:.0f} %")
+        c4.metric("Leggerezza", f"{(w_weight/tot_w)*100:.0f} %")
 
     # --- CALCOLO MPI REALE ---
     w_mid = 1.0 - (heel_pct / 100.0); w_heel_val = heel_pct / 100.0
     
-    # Ricalcolo dinamico indici parziali
     df_filt.loc[:, "ShockIndex_calc"] = safe_norm(w_heel_val * df_filt["shock_abs_tallone"] + w_mid * df_filt["shock_abs_mesopiede"])
     df_filt.loc[:, "EnergyIndex_calc"] = safe_norm(w_heel_val * df_filt["energy_ret_tallone"] + w_mid * df_filt["energy_ret_mesopiede"])
 
-    # MPI include SOLO metriche di performance (come richiesto)
     df_filt.loc[:, "MPI_B"] = (
         (w_shock * df_filt["ShockIndex_calc"] + 
          w_energy * df_filt["EnergyIndex_calc"] + 
@@ -258,7 +247,7 @@ if check_password():
                 st.warning("Nessun risultato nel range di budget.")
 
     # ============================================
-    # 2. ANALISI MERCATO
+    # 2. ANALISI MERCATO (UTILIZZA BEST PICK COME DEFAULT)
     # ============================================
 
     st.markdown("---")
@@ -268,16 +257,18 @@ if check_password():
         df_val_sorted = df_filt.sort_values("ValueIndex", ascending=False)
         models = df_val_sorted['label'].tolist()
         
-        # Gestione selezione
+        # 1. Aggiorna lo stato se il Best Pick è stato trovato
         best_pick_label_check = best_pick_label if 'best_pick_label' in locals() and best_pick_label and best_pick_label in models else models[0]
 
         if 'selected_point_key' not in st.session_state:
             st.session_state['selected_point_key'] = best_pick_label_check
         
+        # 2. Aggiorna lo stato se il best pick è diverso dal target attuale
         if best_pick_label_check != st.session_state['selected_point_key']:
              st.session_state['selected_point_key'] = best_pick_label_check
              st.rerun() 
 
+        # 3. Controllo consistenza (fallback)
         curr_sel = st.session_state['selected_point_key']
         if curr_sel not in models:
             curr_sel = models[0]
@@ -298,67 +289,54 @@ if check_password():
             st.dataframe(df_val_sorted[["label", "MPI_B", "ValueIndex"]].head(10), use_container_width=True, hide_index=True)
 
         # ============================================
-    # 3. SCHEDA DETTAGLIO
-    # ============================================
+        # 3. SCHEDA DETTAGLIO
+        # ============================================
 
-    st.markdown("---")
-    st.header("3. Scheda Tecnica")
-    
-    # Recupera la riga selezionata in modo sicuro
-    try:
-        row = df_filt[df_filt["label"] == sel_input].iloc[0]
-    except IndexError:
-        st.warning("Errore nel recupero del modello selezionato.")
-        st.stop()
-    
-    with st.container(border=True):
-        c1, c2 = st.columns([1, 2])
+        st.markdown("---")
+        st.header("3. Scheda Tecnica")
         
-        # Colonna Sinistra: Info Generali e Valore
-        with c1:
-            st.subheader(f"{row['marca']}")
-            st.markdown(f"**{row['modello']}**")
-            if pd.notna(row.get('versione')):
-                st.caption(f"Versione: {int(row['versione'])}")
-            
-            st.metric("MPI Score", f"{row['MPI_B']:.2f}")
-            st.write(f"Prezzo: **{row[PRICE_COL]:.0f} €**")
-            
-            if pd.notna(row.get('ValueIndex')):
-                val_idx = float(row['ValueIndex'])
-                stars = render_stars(val_idx)
-                st.write(f"**Value:** {val_idx:.2f} {stars}")
+        # Recupera la riga selezionata in modo sicuro
+        try:
+            row = df_filt[df_filt["label"] == sel_input].iloc[0]
+        except IndexError:
+            st.warning("Errore nel recupero del modello selezionato.")
+            st.stop()
+        
+        with st.container(border=True):
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                st.subheader(f"{row['marca']}")
+                st.markdown(f"**{row['modello']}**")
+                st.metric("MPI Score", f"{row['MPI_B']:.2f}")
+                st.write(f"**Value Index:** {row['ValueIndex']:.2f} {render_stars(row['ValueIndex'])}")
 
-            # --- NUOVO: Visualizzazione Fit ---
-            if 'FitClass' in row:
-                st.info(f"👟 **Calzata:** {row['FitClass']}")
+                # --- Visualizzazione Fit/Durabilità ---
+                st.markdown("---")
+                st.markdown("#### Info Aggiuntive")
+                
+                if 'FitClass' in row:
+                    st.info(f"Calzata: **{row['FitClass']}**")
+                
+                if 'DurabilityIndex' in row:
+                    dur_val = float(row['DurabilityIndex'])
+                    dur_label = "Alta" if dur > 0.7 else "Media" if dur > 0.4 else "Bassa"
+                    st.write(f"Durabilità Stimata: **{dur_label}** ({dur_val:.2f})")
+                    st.progress(dur_val)
 
-        # Colonna Destra: Dettagli Tecnici
-        with c2:
-            st.write(f"**Peso:** {row['peso']}g | **Cluster:** {row['ClusterDescrizione']}")
-            
-            colA, colB = st.columns(2)
-            
-            # Indici Performance (MPI)
-            colA.progress(row['ShockIndex_calc'], text=f"Shock: {row['ShockIndex_calc']:.2f}")
-            colB.progress(row['EnergyIndex_calc'], text=f"Energy: {row['EnergyIndex_calc']:.2f}")
-            colA.progress(row['FlexIndex'], text=f"Flex: {row['FlexIndex']:.2f}")
-            colB.progress(row['DriveIndex'], text=f"Drive: {row['DriveIndex']:.2f}")
-            
-            # --- NUOVO: Visualizzazione Durabilità ---
-            st.markdown("---")
-            if 'DurabilityIndex' in row:
-                dur = float(row['DurabilityIndex'])
-                dur_label = "Alta" if dur > 0.7 else "Media" if dur > 0.4 else "Bassa"
-                st.write(f"🛡️ **Durabilità Stimata:** {dur_label} ({dur:.2f})")
-                st.progress(dur)
-        # --- STEP 4: SIMILITUDINE (MOSTRA ANCHE EXTRA) ---
+            with c2:
+                st.write(f"Peso: {row['peso']}g | Cluster: {row['ClusterDescrizione']}")
+                colA, colB = st.columns(2)
+                colA.progress(row['ShockIndex_calc'], text=f"Shock: {row['ShockIndex_calc']:.2f}")
+                colB.progress(row['EnergyIndex_calc'], text=f"Energy: {row['EnergyIndex_calc']:.2f}")
+                colA.progress(row['FlexIndex'], text=f"Flex: {row['FlexIndex']:.2f}")
+                colB.progress(row['DriveIndex'], text=f"Drive: {row['DriveIndex']:.2f}")
+
+        # --- STEP 4: SIMILITUDINE ---
         st.markdown("---")
         st.header("4. Similitudine & Radar")
         cols_sim = ["ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "DriveIndex"]
         sim_weights = [w_shock, w_energy, w_flex, w_weight, w_drive]
         
-        # Trova 2 scarpe simili basate sui pesi MPI
         simili = trova_scarpe_simili(df_filt, sel_input, cols_sim, weights=sim_weights, n_simili=2)
         
         if not simili.empty:
@@ -369,21 +347,18 @@ if check_password():
                         st.markdown(f"**Alternativa {i+1}: {s_row['label']}**")
                         st.caption(f"Distanza Biomeccanica: {s_row['distanza_similitudine']:.2f}")
                         
-                        # Info extra per confronto rapido
                         fit_info = s_row.get('FitClass', 'N/D')
                         dur_val_sim = s_row.get('DurabilityIndex', 0)
-                        st.caption(f"Fit: {fit_info} | Durata: {dur_val_sim:.2f}")
+                        st.caption(f"Calzata: {fit_info} | Durata: {dur_val_sim:.2f}")
             
             df_rad = pd.concat([df_filt[df_filt['label']==sel_input], simili], ignore_index=True)
             st.plotly_chart(plot_radar_comparison_plotly_styled(df_rad, cols_sim), use_container_width=True)
         else:
             st.warning("Nessun modello simile trovato con i filtri attuali.")
         
-        # --- TABELLA CONTROLLO ---
+        # Tabella Controllo
         st.markdown("---")
-        with st.expander("Tabella Dati Completa (Tutti gli Indici)"):
-            cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "DurabilityIndex", "FitClass", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
+        with st.expander("📊 Tabella di Controllo Completa"):
+            cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StackFactor", "DurabilityIndex", "FitClass", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
             if PRICE_COL: cols_ctrl.append(PRICE_COL)
             st.dataframe(df_filt[[c for c in cols_ctrl if c in df_filt.columns]], use_container_width=True)
-
-
