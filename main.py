@@ -75,6 +75,10 @@ if check_password():
         ### 4. Durability Index ($I_{Dur}$)
         Combinazione pesata dei tassi di usura.
         $$ I_{Dur} = 0.6 \cdot (1 - \frac{Danno_{suola}}{Spessore_{suola}}) + 0.25 \cdot Res_{Tomaia} + 0.15 \cdot Res_{Tallone} $$
+
+        ### 5. Stability Index ($I_{Stab}$)
+        Indice strutturale indipendente dall'MPI. Combina rigidità torsionale, larghezza della base e penalità per stack height elevato.
+        $$ I_{Stab} = 0.3 \cdot S_{Torsion} + 0.2 \cdot S_{WidthMid} + 0.2 \cdot S_{WidthHeel} + 0.15 \cdot S_{HeelStruct} + 0.15 \cdot (1 - S_{StackHeight}) $$
         """)
     # --- FINE EXPANDERs RICHIESTI ---
 
@@ -392,6 +396,7 @@ if check_password():
             cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StabilityIndex", "DurabilityIndex", "FitClass", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
             if PRICE_COL: cols_ctrl.append(PRICE_COL)
             st.dataframe(df_filt[[c for c in cols_ctrl if c in df_filt.columns]], use_container_width=True)
+
 
 
 
