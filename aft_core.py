@@ -213,6 +213,7 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     df = calcola_durability_index(df)
     df = calcola_fit_class(df)
     df = calcola_stability_index(df)
+    df['GripIndex'] = calcola_grip_score(df).round(2)
     
     return df
 
@@ -301,6 +302,7 @@ def trova_scarpe_simili(df, target_label, metrics_cols, weights=None, n_simili=3
         return simili
     except Exception:
         return pd.DataFrame()
+
 
 
 
