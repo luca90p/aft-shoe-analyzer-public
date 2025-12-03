@@ -15,44 +15,40 @@ from sklearn.metrics import silhouette_samples
 # --- NUOVA FUNZIONE STABILITÀ ---
 def calcola_stability_index(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calcola un indice di Stabilità (0-1) basato su geometria e rigidità strutturale.
-    Input: Torsione, Rigidità Tallone, Larghezze Suola, Stack Height.
+    Calcola indice Stabilità (0-1).
+    Include ora il GRIP come fattore di sicurezza attiva.
     """
-    
-    # Helper per normalizzazione sicura (riempie i NaN con la media)
     def safe_norm_fill(s):
         s = pd.to_numeric(s, errors='coerce')
         s = s.fillna(s.mean())
         return (s - s.min()) / (s.max() - s.min() + 1e-9)
 
-    # 1. Rigidità Strutturale (Torsione e Tallone)
-    # Assumiamo scala 1-5. Normalizziamo: (Val - 1) / 4
+    # 1. Rigidità Strutturale
     torsion = pd.to_numeric(df['rigidezza_torsionale'], errors='coerce').fillna(3)
     heel_stiff = pd.to_numeric(df['rigidezza_tallone'], errors='coerce').fillna(3)
     
     S_Torsion = ((torsion - 1) / 4).clip(0, 1)
     S_HeelStruct = ((heel_stiff - 1) / 4).clip(0, 1)
 
-    # 2. Geometria (Base d'appoggio)
-    # Più larga è la suola, più è stabile
+    # 2. Geometria Base
     S_Width_Mid = safe_norm_fill(df['larghezza_suola_mesop'])
     S_Width_Heel = safe_norm_fill(df['larghezza_suola_tallone'])
 
     # 3. Stack Height (Penalità)
-    # Più alta è la scarpa, meno è stabile (baricentro alto).
-    # Invertiamo la normalizzazione: Basso = 1.0, Alto = 0.0
     S_LowStack = 1.0 - safe_norm_fill(df['altezza_tallone'])
-
-    # 4. Calcolo Ponderato
-    # La torsione e la larghezza al mesopiede sono i driver principali per l'anti-pronazione
-    df['StabilityIndex'] = (
-        0.30 * S_Torsion +
-        0.20 * S_Width_Mid +
-        0.20 * S_Width_Heel +
-        0.15 * S_HeelStruct +
-        0.15 * S_LowStack
-    )
     
+    # 4. Grip (Nuovo)
+    S_Grip = calcola_grip_score(df)
+
+    # 5. Calcolo Ponderato (Grip pesa il 10%)
+    df['StabilityIndex'] = (
+        0.25 * S_Torsion +
+        0.20 * S_Width_Mid +
+        0.15 * S_Width_Heel +
+        0.15 * S_HeelStruct +
+        0.15 * S_LowStack +
+        0.10 * S_Grip 
+    )
     return df
 
 def calcola_durability_index(df: pd.DataFrame) -> pd.DataFrame:
@@ -100,16 +96,20 @@ def calcola_fit_class(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
-    """ Calcola il 'Drive Index' (0-1). """
+    """ 
+    Calcola il 'Drive Index' (0-1). 
+    Il GRIP agisce come moltiplicatore di efficienza.
+    """
+    # 1. Plate
     def score_plate(val):
         val = str(val).lower()
         if 'carbon' in val or 'carbitex' in val: return 1.0
         if 'fiberglass' in val: return 0.7
         if any(x in val for x in ['plastic', 'tpu', 'nylon']): return 0.5
         return 0.1 
-
     S_Plate = df['piastra'].apply(score_plate)
 
+    # 2. Rocker
     def score_rocker(val):
         if pd.isna(val) or str(val) in ['nan', '#N/D']: return 0.0
         try:
@@ -120,17 +120,25 @@ def calcola_drive_index(df: pd.DataFrame) -> pd.DataFrame:
                 return min(h / 10.0, 1.0)
             return 0.0
         except:
-            return 0.0
-            
+            return 0.0    
     S_Rocker = df['rocker'].apply(score_rocker)
-    S_Foam = df['EnergyIndex'] 
-    
-    flex_val = pd.to_numeric(df['rigidezza_flex'], errors='coerce').fillna(15)
-    S_Stiffness = (flex_val - 5) / 30.0 
-    S_Stiffness = S_Stiffness.clip(0, 1)
 
+    # 3. Schiuma & Rigidità
+    S_Foam = df['EnergyIndex'] 
+    flex_val = pd.to_numeric(df['rigidezza_flex'], errors='coerce').fillna(15)
+    S_Stiffness = ((flex_val - 5) / 30.0).clip(0, 1)
+    
+    # 4. Grip Efficiency Factor (0.8 a 1.1)
+    # Un buon grip (1.0) dà un bonus del 10%. Un pessimo grip (0.0) dà un malus del 20%.
+    S_Grip = calcola_grip_score(df)
+    Grip_Factor = 0.8 + (0.3 * S_Grip) 
+
+    # Formula Base Teeter-Totter
     Mechanical_Drive = S_Plate * S_Rocker * S_Stiffness
-    df['DriveIndex'] = (0.6 * Mechanical_Drive) + (0.4 * S_Foam)
+    Raw_Drive = (0.6 * Mechanical_Drive) + (0.4 * S_Foam)
+    
+    # Applicazione Efficienza Grip
+    df['DriveIndex'] = (Raw_Drive * Grip_Factor).clip(0, 1)
     
     return df
 
@@ -283,5 +291,6 @@ def trova_scarpe_simili(df, target_label, metrics_cols, weights=None, n_simili=3
         return simili
     except Exception:
         return pd.DataFrame()
+
 
 
