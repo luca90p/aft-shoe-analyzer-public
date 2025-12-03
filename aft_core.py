@@ -13,6 +13,16 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
 
 # --- NUOVA FUNZIONE STABILITÀ ---
+def calcola_grip_score(df: pd.DataFrame) -> pd.Series:
+    """
+    Calcola un punteggio di Grip normalizzato (0-1).
+    Basato su 'test_trazione'. Range tipico DB: 0.25 - 0.85.
+    """
+    grip = pd.to_numeric(df['test_trazione'], errors='coerce')
+    # Normalizziamo tra 0.3 (scivolosa) e 0.9 (colla)
+    # Valori sotto 0.3 diventano 0, sopra 0.9 diventano 1
+    S_Grip = (grip - 0.3) / (0.9 - 0.3)
+    return S_Grip.clip(0, 1).fillna(0.5)
 def calcola_stability_index(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calcola indice Stabilità (0-1).
@@ -291,6 +301,7 @@ def trova_scarpe_simili(df, target_label, metrics_cols, weights=None, n_simili=3
         return simili
     except Exception:
         return pd.DataFrame()
+
 
 
 
