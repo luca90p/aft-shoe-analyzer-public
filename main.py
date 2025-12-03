@@ -394,9 +394,10 @@ if check_password():
         # --- TABELLA CONTROLLO ---
         st.markdown("---")
         with st.expander("Tabella Dati Completa (Tutti gli Indici)"):
-            cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StabilityIndex", "DurabilityIndex", "FitClass", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
+            cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StabilityIndex", "DurabilityIndex", "FitClass", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex", "S_Grip"]
             if PRICE_COL: cols_ctrl.append(PRICE_COL)
             st.dataframe(df_filt[[c for c in cols_ctrl if c in df_filt.columns]], use_container_width=True)
+
 
 
 
