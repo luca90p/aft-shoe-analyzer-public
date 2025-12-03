@@ -347,11 +347,18 @@ if check_password():
             
             # --- NUOVO: Visualizzazione Durabilità ---
             st.markdown("---")
+            if 'StabilityIndex' in row:
+                    stab = float(row['StabilityIndex'])
+                    stab_desc = "Alta" if stab > 0.7 else "Media" if stab > 0.4 else "Bassa"
+                    st.write(f"⚖️ **Stabilità Strutturale:** {stab_desc} ({stab:.2f})")
+                    st.progress(stab)
+                
             if 'DurabilityIndex' in row:
                 dur = float(row['DurabilityIndex'])
                 dur_label = "Alta" if dur > 0.7 else "Media" if dur > 0.4 else "Bassa"
                 st.write(f"🛡️ **Durabilità Stimata:** {dur_label} ({dur:.2f})")
                 st.progress(dur)
+                
         # --- STEP 4: SIMILITUDINE (MOSTRA ANCHE EXTRA) ---
         st.markdown("---")
         st.header("4. Similitudine & Radar")
@@ -382,8 +389,9 @@ if check_password():
         # --- TABELLA CONTROLLO ---
         st.markdown("---")
         with st.expander("Tabella Dati Completa (Tutti gli Indici)"):
-            cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "DurabilityIndex", "FitClass", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
+            cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StabilityIndex", "DurabilityIndex", "FitClass", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
             if PRICE_COL: cols_ctrl.append(PRICE_COL)
             st.dataframe(df_filt[[c for c in cols_ctrl if c in df_filt.columns]], use_container_width=True)
+
 
 
