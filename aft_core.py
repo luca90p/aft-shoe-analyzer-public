@@ -194,6 +194,7 @@ def calcola_indici(df: pd.DataFrame) -> pd.DataFrame:
     # 6. AGGIUNTA CRUCIALE: Chiamata alle funzioni Durabilità e Fit
     df = calcola_durability_index(df)
     df = calcola_fit_class(df)
+    df = calcola_stability_index(df)
     
     return df
 
@@ -282,4 +283,5 @@ def trova_scarpe_simili(df, target_label, metrics_cols, weights=None, n_simili=3
         return simili
     except Exception:
         return pd.DataFrame()
+
 
