@@ -63,6 +63,7 @@ if check_password():
         ### 2. Drive Index ($I_{Drive}$) - "Teeter-Totter Effect"
         Modella la spinta come **interazione moltiplicativa** (effetto leva) tra i componenti meccanici, sommata al contributo del materiale.
         $$ I_{Drive} = 0.6 \cdot (S_{Plate} \cdot S_{Rocker} \cdot S_{Stiff}) + 0.4 \cdot I_{Energy} $$
+        $$ I_{Drive} = (0.6 \cdot S_{Mech} + 0.4 \cdot S_{Foam}) \cdot (0.8 + 0.3 \cdot S_{Grip}) $$
         * $S_{Plate}$: 1.0 (Carbonio), 0.7 (Vetro), 0.5 (Plastica).
         * $S_{Rocker}$: Altezza punta normalizzata su 10mm.
         * $S_{Stiff}$: Rigidità normalizzata su 35N ($F_N / 35$).
@@ -78,7 +79,7 @@ if check_password():
 
         ### 5. Stability Index ($I_{Stab}$)
         Indice strutturale indipendente dall'MPI. Combina rigidità torsionale, larghezza della base e penalità per stack height elevato.
-        $$ I_{Stab} = 0.3 \cdot S_{Torsion} + 0.2 \cdot S_{WidthMid} + 0.2 \cdot S_{WidthHeel} + 0.15 \cdot S_{HeelStruct} + 0.15 \cdot (1 - S_{StackHeight}) $$
+        $$ I_{Stab} = 0.3 \cdot S_{Torsion} + 0.2 \cdot S_{WidthMid} + 0.2 \cdot S_{WidthHeel} + 0.15 \cdot S_{HeelStruct} + 0.15 \cdot (1 - S_{StackHeight})+ 0.1 \cdot S_{Grip} $$
         """)
     # --- FINE EXPANDERs RICHIESTI ---
 
@@ -396,6 +397,7 @@ if check_password():
             cols_ctrl = ["label", "MPI_B", "ValueIndex", "DriveIndex", "StabilityIndex", "DurabilityIndex", "FitClass", "ShockIndex_calc", "EnergyIndex_calc", "FlexIndex", "WeightIndex"]
             if PRICE_COL: cols_ctrl.append(PRICE_COL)
             st.dataframe(df_filt[[c for c in cols_ctrl if c in df_filt.columns]], use_container_width=True)
+
 
 
 
